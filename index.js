@@ -1,29 +1,26 @@
 const express = require('express');
 const { exec } = require('child_process');
 const app = express();
-// هذا السطر ضروري جداً ليعمل على Render لأن المنصة تحدد البورت تلقائياً
 const PORT = process.env.PORT || 3000;
 
 app.get('/video-info', (req, res) => {
     const videoUrl = req.query.url;
     if (!videoUrl) return res.status(400).json({ error: "الرجاء إرسال رابط صحيح" });
 
-    // الأمر هنا مجهز ليتعامل مع الكوكيز ويحدد بيئة تشغيل الـ JS
-    // تأكد أن ملف cookies.txt موجود في نفس المجلد
-    const command = `./yt-dlp --js-runtimes node --cookies cookies.txt -j --skip-download "${videoUrl}"`;
+    // قمنا بإضافة User-Agent و Referer للتمويه بأن الطلب قادم من متصفح حقيقي
+    // إذا كان لديك بروكسي، أضف --proxy "رابط_البروكسي" قبل --cookies
+    const command = `./yt-dlp --user-agent "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36" --referer "https://www.youtube.com/" --cookies cookies.txt -j --skip-download "${videoUrl}"`;
 
     exec(command, (error, stdout, stderr) => {
         if (error) {
             return res.status(500).json({ 
-                error: "فشل استخراج البيانات (قد يكون بسبب انتهاء صلاحية الكوكيز)", 
+                error: "فشل استخراج البيانات - يوتيوب يحظر السيرفر", 
                 details: stderr 
             });
         }
 
         try {
             const data = JSON.parse(stdout);
-
-            // تجهيز صيغ الفيديو
             const uniqueFormats = [];
             const seen = new Set();
             const allFormats = data.formats.filter(f => f.url && !f.format_id.startsWith('sb'));
@@ -40,18 +37,11 @@ app.get('/video-info', (req, res) => {
                 }
             }
 
-            // إرسال البيانات كاملة
             res.json({
                 title: data.title,
-                description: data.description,
                 thumbnail: data.thumbnail,
                 duration: data.duration_string,
-                view_count: data.view_count,
-                like_count: data.like_count,
                 channel_name: data.uploader,
-                channel_url: data.uploader_url,
-                channel_thumbnail: data.thumbnails && data.thumbnails.length > 0 ? data.thumbnails[0].url : null, 
-                subscriber_count: data.channel_follower_count,
                 formats: uniqueFormats
             });
         } catch (e) {
