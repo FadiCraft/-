@@ -14,34 +14,24 @@
     <video id="video" controls autoplay playsinline></video>
 
     <script>
-        // استخراج جميع المتغيرات من الرابط
         const urlParams = new URLSearchParams(window.location.search);
-        
-        // جلب رابط البث (سواء كتبته url= أو l=)
-        const streamUrl = urlParams.get('url') || urlParams.get('l');
+        const streamUrl = urlParams.get('l');
         const video = document.getElementById('video');
 
-        // جلب باقي الهيدرز المكتوبة في الرابط (وتخطي رابط البث)
-        const dynamicHeaders = {};
-        urlParams.forEach((value, key) => {
-            if (key !== 'url' && key !== 'l') {
-                dynamicHeaders[key] = value;
-            }
-        });
-
         if (!streamUrl) {
-            alert("لم يتم العثور على رابط البث في شريط العنوان");
+            console.error("الرابط غير موجود");
         } else if (Hls.isSupported()) {
             const hls = new Hls({
                 xhrSetup: function(xhr, url) {
-                    // المرور على كل الهيدرز المستخرجة من الرابط وإضافتها
-                    for (const [headerName, headerValue] of Object.entries(dynamicHeaders)) {
-                        try {
-                            xhr.setRequestHeader(headerName, headerValue);
-                        } catch (e) {
-                            console.warn(`المتصفح منع تعيين الهيدر: ${headerName}`);
-                        }
-                    }
+                    // إضافة الرؤوس المتاحة برمجياً
+                    xhr.setRequestHeader('DNT', '1');
+                    xhr.setRequestHeader('sec-ch-ua', '"Not;A=Brand";v="8", "Chromium";v="150", "Google Chrome";v="150"');
+                    xhr.setRequestHeader('sec-ch-ua-mobile', '?0');
+                    xhr.setRequestHeader('sec-ch-ua-platform', '"Windows"');
+                    xhr.setRequestHeader('Accept', '*/*');
+                    
+                    // ملاحظة: Referer و Origin و User-Agent يتم التحكم بها من المتصفح 
+                    // ولا يمكن تجاوزها عبر كود العميل (Client-side)
                 }
             });
 
@@ -50,16 +40,8 @@
             hls.on(Hls.Events.MANIFEST_PARSED, () => {
                 video.play().catch(e => console.log("التشغيل التلقائي يحتاج تفاعل المستخدم"));
             });
-            
-            // معالجة الأخطاء إذا فشل السيرفر في التشغيل
-            hls.on(Hls.Events.ERROR, function (event, data) {
-                if (data.fatal) {
-                    console.error("حدث خطأ قاتل في المشغل:", data.type);
-                }
-            });
         }
         
-        // إجبار المتصفح على عرض الفيديو بملء الشاشة عند النقر
         video.addEventListener('click', () => {
             if (video.requestFullscreen) {
                 video.requestFullscreen();
