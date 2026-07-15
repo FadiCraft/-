@@ -1,0 +1,27 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+    <meta charset="UTF-8">
+    <title>مشغل البث</title>
+    <script src="https://cdn.jsdelivr.net/npm/hls.js@latest"></script>
+    <style>body { margin: 0; background: #000; display: flex; justify-content: center; align-items: center; height: 100vh; }</style>
+</head>
+<body>
+    <video id="video" controls autoplay style="width: 100%; max-width: 100%;"></video>
+    <script>
+        const urlParams = new URLSearchParams(window.location.search);
+        const streamUrl = urlParams.get('url'); // الرابط الأصلي
+        const video = document.getElementById('video');
+        
+        // نمرر الرابط للـ proxy.php الخاص بنا
+        const proxySource = 'proxy.php?url=' + encodeURIComponent(streamUrl);
+
+        if (Hls.isSupported()) {
+            const hls = new Hls();
+            hls.loadSource(proxySource);
+            hls.attachMedia(video);
+            hls.on(Hls.Events.MANIFEST_PARSED, () => video.play());
+        }
+    </script>
+</body>
+</html>
