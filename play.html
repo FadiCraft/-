@@ -14,24 +14,19 @@
     <video id="video" controls autoplay playsinline></video>
 
     <script>
+        // استخراج الرابط من الرابط الحالي مثل: play.html?url=...
         const urlParams = new URLSearchParams(window.location.search);
-        const streamUrl = urlParams.get('l');
+        const streamUrl = urlParams.get('url');
         const video = document.getElementById('video');
 
         if (!streamUrl) {
-            console.error("الرابط غير موجود");
+            alert("الرجاء إضافة رابط البث في الرابط مثل: ?url=رابط_البث");
         } else if (Hls.isSupported()) {
             const hls = new Hls({
+                // محاولة إرسال الـ Headers اللازمة
                 xhrSetup: function(xhr, url) {
-                    // إضافة الرؤوس المتاحة برمجياً
-                    xhr.setRequestHeader('DNT', '1');
-                    xhr.setRequestHeader('sec-ch-ua', '"Not;A=Brand";v="8", "Chromium";v="150", "Google Chrome";v="150"');
-                    xhr.setRequestHeader('sec-ch-ua-mobile', '?0');
-                    xhr.setRequestHeader('sec-ch-ua-platform', '"Windows"');
-                    xhr.setRequestHeader('Accept', '*/*');
-                    
-                    // ملاحظة: Referer و Origin و User-Agent يتم التحكم بها من المتصفح 
-                    // ولا يمكن تجاوزها عبر كود العميل (Client-side)
+                    xhr.setRequestHeader('Referer', 'https://cup.shootwithyalla.com/');
+                    xhr.setRequestHeader('Origin', 'https://cup.shootwithyalla.com');
                 }
             });
 
@@ -42,6 +37,7 @@
             });
         }
         
+        // إجبار المتصفح على عرض الفيديو بملء الشاشة عند الضغط عليه
         video.addEventListener('click', () => {
             if (video.requestFullscreen) {
                 video.requestFullscreen();
