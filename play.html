@@ -16,11 +16,11 @@
     <script>
         // استخراج الرابط من الرابط الحالي مثل: play.html?url=...
         const urlParams = new URLSearchParams(window.location.search);
-        const streamUrl = urlParams.get('url');
+        const streamUrl = urlParams.get('l');
         const video = document.getElementById('video');
 
         if (!streamUrl) {
-            alert("الرجاء إضافة رابط البث في الرابط مثل: ?url=رابط_البث");
+            alert("");
         } else if (Hls.isSupported()) {
             const hls = new Hls({
                 // محاولة إرسال الـ Headers اللازمة
