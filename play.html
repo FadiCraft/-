@@ -14,21 +14,13 @@
     <video id="video" controls autoplay playsinline></video>
 
     <script>
-        // استخراج الرابط من الرابط الحالي مثل: play.html?l=...
+        // استخراج الرابط من الرابط الحالي مثل: play.html?url=...
         const urlParams = new URLSearchParams(window.location.search);
         const streamUrl = urlParams.get('l');
         const video = document.getElementById('video');
 
-        // [الإضافة الجديدة هنا]
-        // إخفاء البارامترات والإبقاء على الدومين الأصلي فقط (مثل exam.com/)
-        window.history.replaceState({}, document.title, "/"); 
-        
-        // ملاحظة: إذا كنت تريد الإبقاء على اسم الصفحة (exam.com/play.html) بدون البارامترات،
-        // قم باستبدال السطر السابق بهذا السطر:
-        // window.history.replaceState({}, document.title, window.location.pathname);
-
         if (!streamUrl) {
-            console.log("لم يتم تمرير رابط البث");
+            alert("");
         } else if (Hls.isSupported()) {
             const hls = new Hls({
                 // محاولة إرسال الـ Headers اللازمة
