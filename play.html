@@ -3,158 +3,64 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>مشغل المباريات</title>
+    <title>مشغل البث</title>
     <script src="https://cdn.jsdelivr.net/npm/hls.js@latest"></script>
     <style>
-        body, html { 
-            margin: 0; padding: 0; background: #111; 
-            height: 100%; display: flex; flex-direction: column; 
-            font-family: Arial, sans-serif;
-        }
-        #video-container {
-            width: 100%;
-            flex-grow: 1; /* يأخذ باقي المساحة المتاحة */
-            background: #000;
-        }
-        #video { 
-            width: 100%; height: 100%; display: block; 
-        }
-        #servers-container {
-            padding: 15px;
-            background: #222;
-            display: flex;
-            gap: 10px;
-            overflow-x: auto; /* للسماح بالتمرير إذا كثرت السيرفرات */
-            white-space: nowrap;
-            justify-content: center;
-        }
-        .server-btn {
-            background: #34495e;
-            color: white;
-            border: none;
-            padding: 10px 20px;
-            border-radius: 5px;
-            cursor: pointer;
-            font-size: 16px;
-            transition: 0.3s;
-        }
-        .server-btn:hover {
-            background: #2c3e50;
-        }
-        .server-btn.active {
-            background: #e74c3c; /* لون مميز للسيرفر الشغال حالياً */
-            font-weight: bold;
-        }
+        body, html { margin: 0; padding: 0; background: #000; height: 100%; overflow: hidden; }
+        #video { width: 100%; height: 100%; display: block; }
     </style>
 </head>
 <body>
-
-    <div id="video-container">
-        <video id="video" controls autoplay playsinline></video>
-    </div>
-    
-    <div id="servers-container">
-        <!-- سيتم إضافة أزرار السيرفرات هنا تلقائياً -->
-    </div>
+    <video id="video" controls autoplay playsinline></video>
 
     <script>
-        const jsonUrl = "https://raw.githubusercontent.com/sspc11122020-hub/SportFree/refs/heads/main/matches.json";
+        // استخراج جميع المتغيرات من الرابط
+        const urlParams = new URLSearchParams(window.location.search);
+        
+        // جلب رابط البث (سواء كتبته url= أو l=)
+        const streamUrl = urlParams.get('url') || urlParams.get('l');
         const video = document.getElementById('video');
-        const serversContainer = document.getElementById('servers-container');
-        let hls; // متغير عالمي للاحتفاظ بنسخة المشغل
 
-        async function initPlayer() {
-            // 1. استخراج الـ ID من الرابط
-            const urlParams = new URLSearchParams(window.location.search);
-            const idParam = urlParams.get('id');
-
-            if (idParam === null) {
-                alert("يرجى تمرير رقم المباراة في الرابط (مثال: ?id=1)");
-                return;
+        // جلب باقي الهيدرز المكتوبة في الرابط (وتخطي رابط البث)
+        const dynamicHeaders = {};
+        urlParams.forEach((value, key) => {
+            if (key !== 'url' && key !== 'l') {
+                dynamicHeaders[key] = value;
             }
+        });
 
-            try {
-                // 2. جلب البيانات من GitHub
-                const response = await fetch(jsonUrl);
-                const data = await response.json();
-
-                // 3. البحث عن المباراة
-                // يبحث أولاً عن تطابق حقل "id" في الملف، وإن لم يجده يأخذ الترتيب (Index)
-                const match = data.find(m => m.id == idParam) || data[idParam];
-
-                if (!match || !match.streams || match.streams.length === 0) {
-                    alert("لم يتم العثور على المباراة أو لا توجد سيرفرات متاحة.");
-                    return;
-                }
-
-                // 4. إنشاء أزرار السيرفرات
-                match.streams.forEach((stream, index) => {
-                    const btn = document.createElement('button');
-                    btn.className = 'server-btn';
-                    btn.innerText = `سيرفر ${index + 1}`;
-                    btn.onclick = () => playStream(stream, index);
-                    serversContainer.appendChild(btn);
-                });
-
-                // 5. تشغيل السيرفر الأول كوضع افتراضي
-                playStream(match.streams[0], 0);
-
-            } catch (error) {
-                console.error("حدث خطأ أثناء جلب الملف:", error);
-                alert("تعذر جلب بيانات المباريات.");
-            }
-        }
-
-        function playStream(streamData, activeIndex) {
-            // تحديث شكل الأزرار (تلوين السيرفر النشط)
-            const buttons = document.querySelectorAll('.server-btn');
-            buttons.forEach((btn, idx) => {
-                if (idx === activeIndex) {
-                    btn.classList.add('active');
-                } else {
-                    btn.classList.remove('active');
+        if (!streamUrl) {
+            alert("لم يتم العثور على رابط البث في شريط العنوان");
+        } else if (Hls.isSupported()) {
+            const hls = new Hls({
+                xhrSetup: function(xhr, url) {
+                    // المرور على كل الهيدرز المستخرجة من الرابط وإضافتها
+                    for (const [headerName, headerValue] of Object.entries(dynamicHeaders)) {
+                        try {
+                            xhr.setRequestHeader(headerName, headerValue);
+                        } catch (e) {
+                            console.warn(`المتصفح منع تعيين الهيدر: ${headerName}`);
+                        }
+                    }
                 }
             });
 
-            // تدمير المشغل القديم إذا كان يعمل (لتجنب تداخل الأصوات أو الخطأ)
-            if (hls) {
-                hls.destroy();
-            }
-
-            if (Hls.isSupported()) {
-                hls = new Hls({
-                    xhrSetup: function(xhr, url) {
-                        if (streamData.headers) {
-                            for (const [key, value] of Object.entries(streamData.headers)) {
-                                try {
-                                    // محاولة تمرير الهيدرز
-                                    xhr.setRequestHeader(key, value);
-                                } catch (e) {
-                                    // تجاهل الأخطاء الناتجة عن منع المتصفح للهيدرز المحظورة
-                                }
-                            }
-                        }
-                    }
-                });
-
-                hls.loadSource(streamData.url);
-                hls.attachMedia(video);
-                hls.on(Hls.Events.MANIFEST_PARSED, () => {
-                    video.play().catch(e => console.log("التشغيل التلقائي يحتاج لتدخل المستخدم"));
-                });
-            } 
-            // دعم متصفح سفاري (أجهزة الآيفون)
-            else if (video.canPlayType('application/vnd.apple.mpegurl')) {
-                video.src = streamData.url;
-                video.play();
-            }
+            hls.loadSource(streamUrl);
+            hls.attachMedia(video);
+            hls.on(Hls.Events.MANIFEST_PARSED, () => {
+                video.play().catch(e => console.log("التشغيل التلقائي يحتاج تفاعل المستخدم"));
+            });
+            
+            // معالجة الأخطاء إذا فشل السيرفر في التشغيل
+            hls.on(Hls.Events.ERROR, function (event, data) {
+                if (data.fatal) {
+                    console.error("حدث خطأ قاتل في المشغل:", data.type);
+                }
+            });
         }
-
-        // تشغيل الدالة الأساسية عند تحميل الصفحة
-        initPlayer();
         
-        // إجبار المتصفح على العرض بملء الشاشة عند النقر على الفيديو
-        video.addEventListener('dblclick', () => {
+        // إجبار المتصفح على عرض الفيديو بملء الشاشة عند النقر
+        video.addEventListener('click', () => {
             if (video.requestFullscreen) {
                 video.requestFullscreen();
             }
