@@ -196,6 +196,112 @@ app.get('/api/episodes', async (req, res) => {
     }
 });
 
+
+
+
+const puppeteer = require('puppeteer'); // أضف هذا في أعلى الملف مع باقي المكتبات
+
+// ---------------------------------------------------------
+// المسار الرابع (الأصعب): استخراج رابط m3u8 من صفحة المشاهدة
+// ---------------------------------------------------------
+app.get('/api/watch', async (req, res) => {
+    let targetUrl = req.query.url;
+
+    if (!targetUrl) {
+        return res.send(""); // إرجاع فارغ إذا لم يتم إرسال رابط
+    }
+
+    // 1. إضافة watch/ للرابط إذا لم تكن موجودة
+    if (!targetUrl.endsWith('/watch/')) {
+        targetUrl = targetUrl.replace(/\/$/, '') + '/watch/';
+    }
+
+    let browser;
+    try {
+        // تشغيل متصفح كروم المخفي بإعدادات تتناسب مع السيرفرات السحابية
+        browser = await puppeteer.launch({
+            headless: true,
+            args: [
+                '--no-sandbox',
+                '--disable-setuid-sandbox',
+                '--disable-dev-shm-usage',
+                '--disable-web-security'
+            ]
+        });
+
+        const page = await browser.newPage();
+        
+        let foundM3u8 = ""; // المتغير الذي سنحفظ فيه الرابط
+
+        // 2. مراقبة الـ Network بالكامل
+        page.on('response', async (response) => {
+            const url = response.url();
+            // التقاط أي رابط يحتوي على .m3u8
+            if (url.includes('.m3u8') && !foundM3u8) {
+                try {
+                    // فحص الرابط الملتقط إذا كان شغالاً ويعطي استجابة 200
+                    const check = await fetch(url, { method: 'HEAD' });
+                    if (check.ok) {
+                        foundM3u8 = url; // حفظ الرابط الشغال
+                    }
+                } catch (err) {
+                    // تجاهل الرابط التالف
+                }
+            }
+        });
+
+        // 3. الدخول إلى صفحة المشاهدة
+        await page.goto(targetUrl, { waitUntil: 'domcontentloaded', timeout: 30000 });
+
+        // 4. استخراج وترتيب أزرار السيرفرات
+        const servers = await page.$$eval('li.server--item', (items) => {
+            let serverList = [];
+            items.forEach((item, index) => {
+                const text = item.innerText.trim();
+                serverList.push({
+                    index: index,
+                    text: text,
+                    // إعطاء أولوية منخفضة جداً لسيرفر "متعدد الجودات" ليكون الأخير
+                    priority: text.includes('متعدد الجودات') ? 99 : index
+                });
+            });
+            // ترتيب السيرفرات بناءً على الأولوية
+            return serverList.sort((a, b) => a.priority - b.priority);
+        });
+
+        // 5. النقر على السيرفرات واحداً تلو الآخر للبحث عن m3u8
+        for (const server of servers) {
+            if (foundM3u8) break; // التوقف عن الفحص إذا تم العثور على رابط شغال
+
+            try {
+                // النقر على زر السيرفر
+                const serverElements = await page.$$('li.server--item');
+                if (serverElements[server.index]) {
+                    await serverElements[server.index].click();
+                    
+                    // الانتظار لمدة 5 ثوانٍ لإعطاء فرصة لـ iframe للتحميل وإرسال طلب m3u8 للشبكة
+                    await new Promise(r => setTimeout(r, 5000));
+                }
+            } catch (clickErr) {
+                console.log(`فشل النقر على السيرفر: ${server.text}`);
+            }
+        }
+
+        // إغلاق المتصفح بعد الانتهاء لعدم استهلاك رامات السيرفر
+        await browser.close();
+
+        // 6. إرجاع رابط m3u8 كـ نص عادي فقط (بدون JSON) كما طلبت
+        res.setHeader('Content-Type', 'text/plain');
+        res.send(foundM3u8 || "");
+
+    } catch (error) {
+        if (browser) await browser.close();
+        res.setHeader('Content-Type', 'text/plain');
+        res.send(""); // إرجاع فارغ في حال حدوث أي خطأ
+    }
+});
+
+
 // ---------------------------------------------------------
 // تشغيل السيرفر
 // ---------------------------------------------------------
