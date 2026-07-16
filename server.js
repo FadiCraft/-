@@ -1,43 +1,40 @@
+const express = require('express');
 const cheerio = require('cheerio');
 
-// الرابط المراد كشطه
-const url = "https://topcinma.com/movies/";
+const app = express();
+// Render يمرر المنفذ تلقائياً عبر متغيرات البيئة process.env.PORT
+const PORT = process.env.PORT || 3000;
 
-async function scrapeMovies() {
+const targetUrl = "https://topcinma.com/movies/";
+
+// السماح بمرور البيانات باللغة العربية بشكل صحيح
+app.use(express.json());
+
+// الرابط الأساسي للموقع عند فتحه على Render
+app.get('/', async (req, res) => {
     try {
-        console.log("جاري استخراج البيانات من الموقع... برجاء الانتظار");
-
-        // إرسال طلب للموقع باستخدام fetch المدمج في Node.js v24
-        const response = await fetch(url, {
+        const response = await fetch(targetUrl, {
             headers: {
                 "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/115.0.0.0 Safari/537.36"
             }
         });
 
         if (!response.ok) {
-            throw new Error(`HTTP error! status: ${response.status}`);
+            return res.status(500).json({ error: `فشل الاتصال بالموقع المستهدف: ${response.status}` });
         }
 
         const html = await response.text();
-        
-        // تحميل محتوى الصفحة بواسطة cheerio (بديل BeautifulSoup)
         const $ = cheerio.load(html);
         const moviesList = [];
 
-        // البحث عن جميع الصناديق الخاصة بالأفلام بناءً على الكلاس
+        // استخراج البيانات بناءً على الكود الخاص بك
         $('div.Small--Box').each((index, element) => {
             const box = $(element);
 
-            // 1. استخراج الرابط الأساسي للفيلم
             const movieUrl = box.find('a.recent--block').attr('href') || null;
-
-            // 2. استخراج العنوان
-            const title = box.find('h3.title').text().strip || box.find('h3.title').text().trim() || null;
-
-            // 3. استخراج رابط بوستر الفيلم (الصورة)
+            const title = box.find('h3.title').text().trim() || null;
             const imageUrl = box.find('div.Poster img').attr('src') || null;
 
-            // 4. استخراج تفاصيل القائمة (النوع، الجودة، التقييم)
             const genres = [];
             let quality = null;
             let imdbRating = null;
@@ -45,20 +42,17 @@ async function scrapeMovies() {
             box.find('ul.liList li').each((i, li) => {
                 const text = $(li).text().trim();
 
-                // التحقق إذا كان العنصر يحتوي على كلاس التقييم
                 if ($(li).hasClass('imdbRating')) {
-                    imdbRating = text; // سيستخرج التقييم مثل: 4.9
+                    imdbRating = text;
                 } else {
-                    // تمييز الجودة عن التصنيف باستخدام التعبيرات النمطية (Regex)
                     if (/p|web|bluray|hd|cam/i.test(text)) {
                         quality = text;
                     } else {
-                        genres.push(text); // إضافة التصنيف مثل (دراما)
+                        genres.push(text);
                     }
                 }
             });
 
-            // تجميع البيانات بشكل مرتب في كائن (Object)
             moviesList.push({
                 title,
                 url: movieUrl,
@@ -69,15 +63,16 @@ async function scrapeMovies() {
             });
         });
 
-        // طباعة النتيجة بتنسيق JSON مقروء ومنظم
-        console.log(JSON.stringify(moviesList, null, 4));
-        return moviesList;
+        // إرجاع النتيجة للمتصفح أو للتطبيق الخاص بك
+        res.setHeader('Content-Type', 'application/json; charset=utf-8');
+        res.json(moviesList);
 
     } catch (error) {
-        console.error("حدث خطأ أثناء استخراج البيانات:", error.message);
-        return [];
+        res.status(500).json({ error: "حدث خطأ داخلي في السيرفر", details: error.message });
     }
-}
+});
 
-// تشغيل الدالة
-scrapeMovies();
+// بدء تشغيل السيرفر والاستماع للمنفذ
+app.listen(PORT, () => {
+    console.log(`السيرفر يعمل الآن بنجاح على المنفذ: ${PORT}`);
+});
