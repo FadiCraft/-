@@ -1,87 +1,107 @@
 const express = require('express');
 const cheerio = require('cheerio');
+const crypto = require('crypto'); // مكتبة مدمجة في Node.js لإنشاء المعرفات
 
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-// السماح بمرور البيانات باللغة العربية بشكل صحيح
 app.use(express.json());
 
-// تغيير المسار ليستقبل الرابط المتغير
+// الهيكل الثابت في حال وجود خطأ أو عدم وجود بيانات
+const emptyResponse = {
+    id: "",
+    title: "",
+    url: "",
+    image: "",
+    genres: "",
+    quality: "",
+    imdb: ""
+};
+
 app.get('/api/page', async (req, res) => {
-    // استخراج الرابط من الـ Query Parameter (url)
     const targetUrl = req.query.url;
 
-    // التحقق من أن المستخدم قام بإرسال الرابط فعلاً
+    // في حال لم يقم المستخدم بإرسال الرابط
     if (!targetUrl) {
-        return res.status(400).json({ 
-            error: "برجاء تزويد الرابط المطلوب كشطه", 
-            example: "/api/page?url=https://topcinma.com/movies/" 
-        });
+        return res.json([emptyResponse]);
     }
 
     try {
-        // إرسال طلب للرابط الديناميكي المرسل
         const response = await fetch(targetUrl, {
             headers: {
                 "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/115.0.0.0 Safari/537.36"
             }
         });
 
+        // في حال كان الموقع معطلاً أو الرابط خاطئاً
         if (!response.ok) {
-            return res.status(500).json({ error: `فشل الاتصال بالموقع المستهدف: ${response.status}` });
+            return res.json([emptyResponse]);
         }
 
         const html = await response.text();
         const $ = cheerio.load(html);
         const moviesList = [];
 
-        // استخراج البيانات بنفس الهيكلية المرتبة
         $('div.Small--Box').each((index, element) => {
             const box = $(element);
 
-            const movieUrl = box.find('a.recent--block').attr('href') || null;
-            const title = box.find('h3.title').text().trim() || null;
-            const imageUrl = box.find('div.Poster img').attr('src') || null;
+            // استخراج القيم الأساسية أو تركها فارغة
+            const movieUrl = box.find('a.recent--block').attr('href') || "";
+            const title = box.find('h3.title').text().trim() || "";
+            const imageUrl = box.find('div.Poster img').attr('src') || "";
 
-            const genres = [];
-            let quality = null;
-            let imdbRating = null;
+            let genre = "";
+            let quality = "";
+            let imdbRating = "";
 
             box.find('ul.liList li').each((i, li) => {
                 const text = $(li).text().trim();
 
                 if ($(li).hasClass('imdbRating')) {
-                    imdbRating = text;
+                    // استخراج الرقم الخاص بالتقييم فقط
+                    imdbRating = text.replace(/[^\d.]/g, ''); 
                 } else {
                     if (/p|web|bluray|hd|cam/i.test(text)) {
                         quality = text;
                     } else {
-                        genres.push(text);
+                        // أخذ تصنيف واحد فقط وتجاهل البقية
+                        if (!genre) {
+                            genre = text;
+                        }
                     }
                 }
             });
 
+            // إنشاء معرف (ID) فريد وثابت بناءً على رابط الفيلم
+            // هكذا نضمن أن المعرف غير عشوائي وثابت لنفس الفيلم دائماً
+            const id = movieUrl ? crypto.createHash('md5').update(movieUrl).digest('hex') : "";
+
             moviesList.push({
-                title,
+                id: id,
+                title: title,
                 url: movieUrl,
-                poster_image: imageUrl,
-                genres,
-                quality,
-                imdb_rating: imdbRating
+                image: imageUrl,
+                genres: genre,
+                quality: quality,
+                imdb: imdbRating
             });
         });
 
-        // إرجاع النتيجة
+        // إذا كانت الصفحة فارغة ولا يوجد بها أفلام
+        if (moviesList.length === 0) {
+            return res.json([emptyResponse]);
+        }
+
+        // إرجاع البيانات بنجاح
         res.setHeader('Content-Type', 'application/json; charset=utf-8');
         res.json(moviesList);
 
     } catch (error) {
-        res.status(500).json({ error: "حدث خطأ داخلي في السيرفر أو الرابط غير صحيح", details: error.message });
+        // في حال حدوث أي خطأ برمجي يتم إرجاع الهيكل الفارغ
+        res.json([emptyResponse]);
     }
 });
 
-// تشغيل السيرفر
 app.listen(PORT, () => {
     console.log(`السيرفر يعمل الآن بنجاح على المنفذ: ${PORT}`);
 });
