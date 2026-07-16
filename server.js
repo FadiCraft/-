@@ -207,26 +207,52 @@ app.get('/api/watch', async (req, res) => {
 
     let browser;
     try {
-        browser = await puppeteer.launch({ headless: true, args: ['--no-sandbox'] });
+        browser = await puppeteer.launch({ 
+            headless: true, 
+            args: ['--no-sandbox', '--disable-setuid-sandbox'] 
+        });
         const page = await browser.newPage();
+        
+        // تحسين الأداء: حظر كل شيء غير الـ iframe
+        await page.setRequestInterception(true);
+        page.on('request', (req) => {
+            if (['image', 'stylesheet', 'font'].includes(req.resourceType())) req.abort();
+            else req.continue();
+        });
+
         await page.goto(targetUrl, { waitUntil: 'domcontentloaded', timeout: 15000 });
 
-        // نضغط على أول سيرفر (غير متعدد الجودات) فقط للتشخيص
-        const buttons = await page.$$('li.server--item');
-        if (buttons.length > 1) {
-            await buttons[1].click(); // نضغط على السيرفر الثاني
-            await new Promise(r => setTimeout(r, 2000));
+        // استخراج السيرفرات (باستبعاد متعدد الجودات)
+        const serverSelectors = await page.$$('li.server--item:not(:contains("متعدد الجودات"))');
+        
+        let foundUrl = "";
+
+        // فحص السيرفر الأول فقط (للتجربة والسرعة) أو يمكنك عمل حلقة تكرار إذا فشل الأول
+        if (serverSelectors.length > 0) {
+            // نأخذ السيرفر الثاني (عادة يكون أول سيرفر حقيقي بعد متعدد الجودات)
+            const targetServer = serverSelectors[0]; 
             
-            // نطبع محتوى الصفحة في السجلات (Logs) لنرى أين يختبئ الرابط
-            const content = await page.content();
-            console.log("=== محتوى الصفحة بعد الضغط ===");
-            console.log(content.substring(0, 2000)); // طباعة أول 2000 حرف
+            // تسجيل الرابط القديم قبل الضغط
+            const oldSrc = await page.evaluate(() => document.querySelector('iframe')?.src);
+
+            await targetServer.click();
+
+            // الانتظار حتى يتغير رابط الـ iframe (أسرع من الانتظار بالثواني)
+            foundUrl = await page.waitForFunction((old) => {
+                const iframe = document.querySelector('iframe');
+                return (iframe && iframe.src !== old && iframe.src.includes('http')) ? iframe.src : null;
+            }, { timeout: 5000 }, oldSrc).catch(() => null);
+
+            if (foundUrl) foundUrl = foundUrl.remoteObject().value;
         }
 
         await browser.close();
-        res.send("تم الفحص، انظر إلى Logs في Render");
+        res.setHeader('Content-Type', 'text/plain');
+        res.send(foundUrl || "");
+
     } catch (e) {
-        res.send("حدث خطأ");
+        if (browser) await browser.close();
+        res.send("");
     }
 });
 // ---------------------------------------------------------
