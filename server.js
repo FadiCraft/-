@@ -1,6 +1,5 @@
 const express = require('express');
-const axios = require('axios');
-const cheerio = require('cheerio');
+const puppeteer = require('puppeteer');
 
 const app = express();
 
@@ -11,54 +10,60 @@ app.get('/api/servers', async (req, res) => {
         return res.status(400).json({ error: 'يرجى تمرير رابط الصفحة' });
     }
 
+    let browser;
     try {
-        const headers = {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8',
-            'Accept-Language': 'ar,en-US;q=0.9,en;q=0.8',
-        };
+        // تشغيل المتصفح مع إعدادات تخطي الحماية والتوافق مع استضافة Render
+        browser = await puppeteer.launch({
+            headless: true,
+            args: [
+                '--no-sandbox',
+                '--disable-setuid-sandbox',
+                '--disable-dev-shm-usage',
+                '--single-process',
+                '--no-zygote'
+            ]
+        });
 
-        // 1. الخطوة الأولى: دخول الصفحة كزائر عادي لجلب الـ Cookies
-        const firstResponse = await axios.get(targetUrl, { headers });
+        const page = await browser.newPage();
         
-        // استخراج الـ Cookies التي أرسلها الموقع
-        const cookies = firstResponse.headers['set-cookie'];
+        // تزويد المتصفح بهوية مستخدم حقيقي تماماً
+        await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36');
 
-        // 2. الخطوة الثانية: إرسال طلب الـ POST (ضغطة الزر) مع الـ Cookies ورابط الإحالة
-        const postResponse = await axios.post(targetUrl, 'View=1', {
-            headers: {
-                ...headers,
-                'Content-Type': 'application/x-www-form-urlencoded',
-                'Referer': targetUrl, // إخبار الموقع أننا نضغط من نفس الصفحة
-                'Cookie': cookies ? cookies.join('; ') : '' // تمرير الكوكيز
-            }
-        });
+        // 1. الدخول إلى صفحة الفيلم والانتظار حتى تحميل الشبكة
+        await page.goto(targetUrl, { waitUntil: 'networkidle2', timeout: 60000 });
 
-        // 3. الخطوة الثالثة: تحليل البيانات واستخراج السيرفرات
-        const $ = cheerio.load(postResponse.data);
-        const servers = [];
+        // 2. الانتظار حتى يظهر زر "المشاهدة والتحميل" في الصفحة
+        await page.waitForSelector('.watchNow button', { timeout: 15000 });
 
-        $('ul.serversList li').each((index, element) => {
-            const serverName = $(element).find('span p').text().trim();
-            const serverLink = $(element).attr('data-link');
+        // 3. محاكاة نقرة حقيقية على الزر
+        await page.click('.watchNow button');
 
-            if (serverName && serverLink) {
-                servers.push({ name: serverName, url: serverLink });
-            }
-        });
+        // 4. الانتظار حتى تظهر قائمة السيرفرات (ul.serversList) وتتحمل بالكامل
+        await page.waitForSelector('ul.serversList li', { timeout: 20000 });
 
-        // إذا كانت القائمة فارغة فهذا يعني أن الحماية ما زالت تحظر السيرفر
-        if (servers.length === 0) {
-            return res.status(403).json({ 
-                success: false, 
-                message: 'لم يتم العثور على سيرفرات، قد يكون الموقع محمياً بشكل صارم ضد سيرفرات Render.' 
+        // 5. استخراج أسماء وروابط السيرفرات من كود الصفحة المتغير
+        const servers = await page.evaluate(() => {
+            const list = [];
+            const elements = document.querySelectorAll('ul.serversList li');
+            elements.forEach(el => {
+                const nameEl = el.querySelector('span p');
+                const name = nameEl ? nameEl.innerText.trim() : '';
+                const url = el.getAttribute('data-link');
+                if (name && url) {
+                    list.push({ name, url });
+                }
             });
-        }
+            return list;
+        });
 
-        res.json({ success: true, data: servers });
+        // إغلاق المتصفح لتوفير استهلاك السيرفر
+        await browser.close();
+
+        res.json({ success: true, count: servers.length, data: servers });
 
     } catch (error) {
-        res.status(500).json({ error: 'حدث خطأ أثناء الاتصال بالموقع: ' + error.message });
+        if (browser) await browser.close();
+        res.status(500).json({ error: 'فشل المتصفح في استخراج السيرفرات: ' + error.message });
     }
 });
 
