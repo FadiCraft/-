@@ -207,69 +207,26 @@ app.get('/api/watch', async (req, res) => {
 
     let browser;
     try {
-        browser = await puppeteer.launch({
-            headless: true,
-            args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage', '--disable-gpu']
-        });
-
+        browser = await puppeteer.launch({ headless: true, args: ['--no-sandbox'] });
         const page = await browser.newPage();
-        
-        // إعدادات أداء صارمة (منع الصور والستايلات والخطوط)
-        await page.setRequestInterception(true);
-        page.on('request', (req) => {
-            if (['image', 'stylesheet', 'font', 'script'].includes(req.resourceType())) req.abort();
-            else req.continue();
-        });
-
         await page.goto(targetUrl, { waitUntil: 'domcontentloaded', timeout: 15000 });
 
-        // استخراج السيرفرات
-        const servers = await page.$$eval('li.server--item', els => 
-            els.map((el, i) => ({ index: i, text: el.innerText }))
-               .filter(s => !s.text.includes('متعدد الجودات'))
-        );
-
-        let finalUrl = "";
-
-        // حلقة الفحص الذكي
-        for (const s of servers) {
-            try {
-                // 1. احصل على الرابط الحالي للـ iframe قبل النقر
-                const oldSrc = await page.evaluate(() => {
-                    const iframe = document.querySelector('iframe');
-                    return iframe ? iframe.src : "";
-                });
-
-                // 2. انقر على السيرفر
-                const elements = await page.$$('li.server--item');
-                if (elements[s.index]) {
-                    await elements[s.index].click();
-
-                    // 3. انتظر فوراً وبذكاء حتى يتغير رابط الـ iframe (بحد أقصى 3 ثوانٍ)
-                    const newSrc = await page.waitForFunction((old) => {
-                        const iframe = document.querySelector('iframe');
-                        // نتحقق أن الرابط تغير وأنه رابط حقيقي (يبدأ بـ http)
-                        if (iframe && iframe.src !== old && iframe.src.startsWith('http')) {
-                            return iframe.src;
-                        }
-                        return false;
-                    }, { timeout: 3000 }, oldSrc).catch(() => null);
-
-                    if (newSrc) {
-                        finalUrl = newSrc.remoteObject().value;
-                        break; // وجدنا سيرفر يعمل! اخرج فوراً
-                    }
-                }
-            } catch (e) { continue; }
+        // نضغط على أول سيرفر (غير متعدد الجودات) فقط للتشخيص
+        const buttons = await page.$$('li.server--item');
+        if (buttons.length > 1) {
+            await buttons[1].click(); // نضغط على السيرفر الثاني
+            await new Promise(r => setTimeout(r, 2000));
+            
+            // نطبع محتوى الصفحة في السجلات (Logs) لنرى أين يختبئ الرابط
+            const content = await page.content();
+            console.log("=== محتوى الصفحة بعد الضغط ===");
+            console.log(content.substring(0, 2000)); // طباعة أول 2000 حرف
         }
 
         await browser.close();
-        res.setHeader('Content-Type', 'text/plain');
-        res.send(finalUrl || "");
-
+        res.send("تم الفحص، انظر إلى Logs في Render");
     } catch (e) {
-        if (browser) await browser.close();
-        res.send("");
+        res.send("حدث خطأ");
     }
 });
 // ---------------------------------------------------------
