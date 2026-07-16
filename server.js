@@ -198,110 +198,101 @@ app.get('/api/episodes', async (req, res) => {
 });
 
 // ---------------------------------------------------------
-// المسار الرابع: استخراج رابط m3u8 من صفحة المشاهدة
+// المسار الرابع: استخراج رابط السيرفر (iframe) السريع والمباشر
 // ---------------------------------------------------------
 app.get('/api/watch', async (req, res) => {
     let targetUrl = req.query.url;
 
-    if (!targetUrl) {
-        return res.send(""); 
-    }
+    if (!targetUrl) return res.send("");
 
-    // 1. تهيئة وتعديل الرابط لينتهي بـ watch/
     if (!targetUrl.endsWith('/watch/')) {
         targetUrl = targetUrl.replace(/\/$/, '') + '/watch/';
     }
 
-    console.log(`\n=== بدء فحص صفحة المشاهدة للرابط: ${targetUrl} ===`);
-
     let browser;
     try {
-        // 2. تشغيل المتصفح بإعدادات مخفية ومحسنة للبيئات السحابية (تقليل استهلاك الرام)
         browser = await puppeteer.launch({
             headless: true,
             args: [
                 '--no-sandbox',
                 '--disable-setuid-sandbox',
                 '--disable-dev-shm-usage',
-                '--disable-web-security',
-                '--disable-features=IsolateOrigins,site-per-process' 
+                '--disable-web-security'
             ]
         });
 
         const page = await browser.newPage();
         
-        // إخفاء هوية البوت وتزويده بمتصفح حقيقي لتجنب جدران الحماية
-        await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36');
-        
-        let foundM3u8 = "";
-
-        // 3. مراقبة الـ Network فور بدء إرسال الطلبات للالتقاط اللحظي والمباشر للرابط
+        // 🚀 تسريع التصفح بشكل خيالي عبر حظر الصور والستايلات والخطوط
+        await page.setRequestInterception(true);
         page.on('request', (request) => {
-            const url = request.url();
-            if (url.includes('.m3u8') && !foundM3u8) {
-                console.log(`=> تم التقاط رابط m3u8 مباشر: ${url}`);
-                foundM3u8 = url; // حفظ الرابط فوراً بمجرد ظهوره في الشبكة
+            const resourceType = request.resourceType();
+            if (['image', 'stylesheet', 'font', 'media'].includes(resourceType)) {
+                request.abort(); // منع التحميل لتسريع العملية
+            } else {
+                request.continue();
             }
         });
 
-        // 4. الدخول للصفحة وانتظار تحميل الـ DOM الأساسي
-        console.log("-> جاري تحميل الصفحة...");
-        await page.goto(targetUrl, { waitUntil: 'domcontentloaded', timeout: 45000 });
+        await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36');
+        
+        // الدخول للصفحة (لن تأخذ سوى ثانية أو ثانيتين الآن)
+        await page.goto(targetUrl, { waitUntil: 'domcontentloaded', timeout: 30000 });
 
-        // الانتظار ثوانٍ بسيطة للتأكد من استقرار أزرار السيرفرات في الصفحة
-        await page.waitForSelector('li.server--item', { timeout: 15000 }).catch(() => {
-            console.log("تنبيه: لم تظهر قائمة السيرفرات في الوقت المحدد.");
-        });
-
-        // 5. جلب السيرفرات وترتيبها (تأخير "متعدد الجودات" للنهاية)
+        // استخراج السيرفرات واستبعاد "متعدد الجودات"
         const servers = await page.$$eval('li.server--item', (items) => {
-            let serverList = [];
+            let list = [];
             items.forEach((item, index) => {
                 const text = item.innerText.trim();
-                serverList.push({
-                    index: index,
-                    text: text,
-                    priority: text.includes('متعدد الجودات') ? 99 : index
-                });
+                // أضف السيرفر للقائمة فقط إذا لم يكن "متعدد الجودات"
+                if (!text.includes('متعدد الجودات')) {
+                    list.push({ index: index, text: text });
+                }
             });
-            return serverList.sort((a, b) => a.priority - b.priority);
+            return list;
         });
 
-        console.log(`=> تم العثور على ${servers.length} سيرفرات جاهزة للفحص.`);
+        let workingIframeSrc = "";
 
-        // 6. محاكاة النقر الفعلي على السيرفرات بالتوالي
+        // فحص السيرفرات بالترتيب
         for (const server of servers) {
-            if (foundM3u8) break; // توقف تام عند نجاح التقاط الرابط
-
-            console.log(`-> جاري النقر لتشغيل سيرفر: ${server.text}`);
             try {
                 const serverElements = await page.$$('li.server--item');
                 if (serverElements[server.index]) {
                     await serverElements[server.index].click();
                     
-                    // انتظار 5 ثوانٍ بعد الضغط للسماح لـ iframe الخاص بالسيرفر بالتحميل وبث رابط m3u8
-                    await new Promise(r => setTimeout(r, 5000));
+                    // انتظار 1.5 ثانية فقط ليتم تحديث كود الـ iframe في الصفحة
+                    await new Promise(r => setTimeout(r, 1500)); 
+
+                    // سحب رابط الـ iframe الجديد
+                    const iframeSrc = await page.$eval('iframe', el => el.src).catch(() => "");
+                    
+                    if (iframeSrc && iframeSrc.startsWith('http')) {
+                        // فحص سريع جداً لمعرفة إذا كان رابط السيرفر يعمل فعلياً
+                        const check = await fetch(iframeSrc, { method: 'HEAD' }).catch(() => null);
+                        if (check && check.ok) {
+                            workingIframeSrc = iframeSrc;
+                            break; // وجدنا سيرفر شغال! توقف عن الفحص فوراً
+                        }
+                    }
                 }
-            } catch (clickErr) {
-                console.log(`فشل النقر على سيرفر: ${server.text}`);
+            } catch (e) {
+                continue; // السيرفر هذا فيه مشكلة، انتقل للمحاولة مع السيرفر التالي
             }
         }
 
-        // إغلاق المتصفح لعدم استنزاف موارد خادم الـ Render
         await browser.close();
-
-        // 7. إرسال رابط m3u8 النهائي كنص عادي ومباشر
+        
+        // إرسال رابط السيرفر فقط كنص عادي
         res.setHeader('Content-Type', 'text/plain');
-        res.send(foundM3u8 || "");
+        res.send(workingIframeSrc || "");
 
     } catch (error) {
-        console.error("!!! حدث خطأ غير متوقع:", error.message);
         if (browser) await browser.close();
         res.setHeader('Content-Type', 'text/plain');
         res.send("");
     }
 });
-
 // ---------------------------------------------------------
 // تشغيل السيرفر
 // ---------------------------------------------------------
