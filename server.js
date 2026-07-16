@@ -1,93 +1,83 @@
-import json
-import requests
-from bs4 import BeautifulSoup
+const cheerio = require('cheerio');
 
-# الرابط المراد كشطه
-url = "https://topcinma.com/movies/"
+// الرابط المراد كشطه
+const url = "https://topcinma.com/movies/";
 
-# إرسال كود الـ User-Agent لتبدو الزيارة وكأنها من متصفح حقيقي لتجنب الحظر
-headers = {
-    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/115.0.0.0 Safari/537.36"
+async function scrapeMovies() {
+    try {
+        console.log("جاري استخراج البيانات من الموقع... برجاء الانتظار");
+
+        // إرسال طلب للموقع باستخدام fetch المدمج في Node.js v24
+        const response = await fetch(url, {
+            headers: {
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/115.0.0.0 Safari/537.36"
+            }
+        });
+
+        if (!response.ok) {
+            throw new Error(`HTTP error! status: ${response.status}`);
+        }
+
+        const html = await response.text();
+        
+        // تحميل محتوى الصفحة بواسطة cheerio (بديل BeautifulSoup)
+        const $ = cheerio.load(html);
+        const moviesList = [];
+
+        // البحث عن جميع الصناديق الخاصة بالأفلام بناءً على الكلاس
+        $('div.Small--Box').each((index, element) => {
+            const box = $(element);
+
+            // 1. استخراج الرابط الأساسي للفيلم
+            const movieUrl = box.find('a.recent--block').attr('href') || null;
+
+            // 2. استخراج العنوان
+            const title = box.find('h3.title').text().strip || box.find('h3.title').text().trim() || null;
+
+            // 3. استخراج رابط بوستر الفيلم (الصورة)
+            const imageUrl = box.find('div.Poster img').attr('src') || null;
+
+            // 4. استخراج تفاصيل القائمة (النوع، الجودة، التقييم)
+            const genres = [];
+            let quality = null;
+            let imdbRating = null;
+
+            box.find('ul.liList li').each((i, li) => {
+                const text = $(li).text().trim();
+
+                // التحقق إذا كان العنصر يحتوي على كلاس التقييم
+                if ($(li).hasClass('imdbRating')) {
+                    imdbRating = text; // سيستخرج التقييم مثل: 4.9
+                } else {
+                    // تمييز الجودة عن التصنيف باستخدام التعبيرات النمطية (Regex)
+                    if (/p|web|bluray|hd|cam/i.test(text)) {
+                        quality = text;
+                    } else {
+                        genres.push(text); // إضافة التصنيف مثل (دراما)
+                    }
+                }
+            });
+
+            // تجميع البيانات بشكل مرتب في كائن (Object)
+            moviesList.push({
+                title,
+                url: movieUrl,
+                poster_image: imageUrl,
+                genres,
+                quality,
+                imdb_rating: imdbRating
+            });
+        });
+
+        // طباعة النتيجة بتنسيق JSON مقروء ومنظم
+        console.log(JSON.stringify(moviesList, null, 4));
+        return moviesList;
+
+    } catch (error) {
+        console.error("حدث خطأ أثناء استخراج البيانات:", error.message);
+        return [];
+    }
 }
 
-
-def scrape_movies(target_url):
-    try:
-        # إرسال طلب للموقع
-        response = requests.get(target_url, headers=headers)
-        response.raise_for_status()  # التأكد من أن الطلب تم بنجاح
-
-        # تحليل محتوى الصفحة
-        soup = BeautifulSoup(response.content, "html.parser")
-
-        # البحث عن جميع الصناديق الخاصة بالأفلام بناءً على الكلاس الذي أرفقته
-        movie_boxes = soup.find_all("div", class_="Small--Box")
-
-        movies_list = []
-
-        for box in movie_boxes:
-            # 1. استخراج الرابط الأساسي للفيلم
-            a_tag = box.find("a", class_="recent--block")
-            movie_url = a_tag["href"] if a_tag else None
-
-            # 2. استخراج العنوان
-            title_tag = box.find("h3", class_="title")
-            title = title_tag.text.strip() if title_tag else None
-
-            # 3. استخراج رابط بوستر الفيلم (الصورة)
-            poster_div = box.find("div", class_="Poster")
-            img_tag = poster_div.find("img") if poster_div else None
-            image_url = img_tag["src"] if img_tag else None
-
-            # 4. استخراج تفاصيل القائمة (النوع، الجودة، التقييم)
-            ul_list = box.find("ul", class_="liList")
-            genres = []
-            quality = None
-            imdb_rating = None
-
-            if ul_list:
-                li_tags = ul_list.find_all("li")
-
-                for li in li_tags:
-                    # التحقق إذا كان العنصر يحتوي على كلاس التقييم
-                    if "imdbRating" in li.get("class", []):
-                        imdb_rating = (
-                            li.text.strip()
-                        )  # سيستخرج التقييم مثل: 4.9
-                    else:
-                        text = li.text.strip()
-                        # تمييز الجودة عن التصنيف (إذا كان النص يحتوي على p أو WEB أو BluRay إلخ فهو جودة)
-                        if any(
-                            q in text.lower()
-                            for q in ["p", "web", "bluray", "hd", "cam"]
-                        ):
-                            quality = text
-                        else:
-                            genres.append(text)  # إضافة التصنيف مثل (دراما)
-
-            # تجميع البيانات بشكل مرتب في قاموس (Dictionary)
-            movie_data = {
-                "title": title,
-                "url": movie_url,
-                "poster_image": image_url,
-                "genres": genres,
-                "quality": quality,
-                "imdb_rating": imdb_rating,
-            }
-
-            movies_list.append(movie_data)
-
-        return movies_list
-
-    except Exception as e:
-        print(f"حدث خطأ أثناء استخراج البيانات: {e}")
-        return []
-
-
-# تشغيل الكود وطباعة النتيجة بشكل مرتب جداً (JSON)
-if __name__ == "__main__":
-    print("جاري استخراج البيانات من الموقع... برجاء الانتظار")
-    results = scrape_movies(url)
-
-    # طباعة النتيجة بتنسيق JSON مقروء ومنظم لدعم اللغة العربية
-    print(json.dumps(results, ensure_ascii=False, indent=4))
+// تشغيل الدالة
+scrapeMovies();
