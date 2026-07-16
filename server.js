@@ -2,17 +2,26 @@ const express = require('express');
 const cheerio = require('cheerio');
 
 const app = express();
-// Render يمرر المنفذ تلقائياً عبر متغيرات البيئة process.env.PORT
 const PORT = process.env.PORT || 3000;
-
-const targetUrl = "https://topcinma.com/movies/";
 
 // السماح بمرور البيانات باللغة العربية بشكل صحيح
 app.use(express.json());
 
-// الرابط الأساسي للموقع عند فتحه على Render
-app.get('/', async (req, res) => {
+// تغيير المسار ليستقبل الرابط المتغير
+app.get('/api/page', async (req, res) => {
+    // استخراج الرابط من الـ Query Parameter (url)
+    const targetUrl = req.query.url;
+
+    // التحقق من أن المستخدم قام بإرسال الرابط فعلاً
+    if (!targetUrl) {
+        return res.status(400).json({ 
+            error: "برجاء تزويد الرابط المطلوب كشطه", 
+            example: "/api/page?url=https://topcinma.com/movies/" 
+        });
+    }
+
     try {
+        // إرسال طلب للرابط الديناميكي المرسل
         const response = await fetch(targetUrl, {
             headers: {
                 "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/115.0.0.0 Safari/537.36"
@@ -27,7 +36,7 @@ app.get('/', async (req, res) => {
         const $ = cheerio.load(html);
         const moviesList = [];
 
-        // استخراج البيانات بناءً على الكود الخاص بك
+        // استخراج البيانات بنفس الهيكلية المرتبة
         $('div.Small--Box').each((index, element) => {
             const box = $(element);
 
@@ -63,16 +72,16 @@ app.get('/', async (req, res) => {
             });
         });
 
-        // إرجاع النتيجة للمتصفح أو للتطبيق الخاص بك
+        // إرجاع النتيجة
         res.setHeader('Content-Type', 'application/json; charset=utf-8');
         res.json(moviesList);
 
     } catch (error) {
-        res.status(500).json({ error: "حدث خطأ داخلي في السيرفر", details: error.message });
+        res.status(500).json({ error: "حدث خطأ داخلي في السيرفر أو الرابط غير صحيح", details: error.message });
     }
 });
 
-// بدء تشغيل السيرفر والاستماع للمنفذ
+// تشغيل السيرفر
 app.listen(PORT, () => {
     console.log(`السيرفر يعمل الآن بنجاح على المنفذ: ${PORT}`);
 });
