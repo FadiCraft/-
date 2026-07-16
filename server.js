@@ -198,44 +198,89 @@ app.get('/api/episodes', async (req, res) => {
 });
 
 // ---------------------------------------------------------
-// المسار الرابع: استخراج رابط السيرفر (iframe) السريع والمباشر
+// المسار الرابع: استخراج رابط السيرفر (iframe) مع فلترة الإعلانات
 // ---------------------------------------------------------
-const axios = require('axios'); // تأكد من إضافة axios للمشروع عبر npm install axios
-
 app.get('/api/watch', async (req, res) => {
-    const targetUrl = req.query.url; // الرابط الذي أرسلته
+    let targetUrl = req.query.url;
     if (!targetUrl) return res.send("");
+    if (!targetUrl.endsWith('/watch/')) targetUrl = targetUrl.replace(/\/$/, '') + '/watch/';
+
+    let browser;
+    let foundIframe = ""; // متغير لتخزين الرابط الصحيح فقط
 
     try {
-        // 1. استخراج الـ ID الخاص بالفيلم من الرابط (هنا ستحتاج لفتحه مرة واحدة بجافاسكريبت خفيف)
-        // وبما أننا لا نريد فتح متصفح، سنستخدم استراتيجية الحصول على ID
-        // ولكن للتجربة، جرب هذا الطلب المباشر:
-        
-        // ملاحظة: أنت تحتاج لمعرفة ID الفيلم و رقم السيرفر
-        // إذا كان لديك ID الفيلم من قائمة الأفلام (data-id)، استخدمه هنا:
-        const postId = req.query.id; 
-        const serverId = req.query.server || 0;
+        browser = await puppeteer.launch({
+            headless: true,
+            args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage', '--disable-gpu']
+        });
 
-        const response = await axios.post('https://topcinma.com/wp-admin/admin-ajax.php', 
-            `action=get_player&id=${postId}&server=${serverId}`, {
-            headers: {
-                'Content-Type': 'application/x-www-form-urlencoded',
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'
+        const page = await browser.newPage();
+        
+        // إعدادات أداء صارمة لمنع تحميل كل ما هو غير ضروري
+        await page.setRequestInterception(true);
+        page.on('request', (req) => {
+            const type = req.resourceType();
+            if (['image', 'stylesheet', 'font', 'script'].includes(type)) {
+                req.abort();
+            } else {
+                req.continue();
             }
         });
 
-        // استخراج الرابط من الرد (غالباً ما يكون iframe أو رابط مباشر)
-        const html = response.data;
-        const match = html.match(/src=["'](https?:\/\/[^"']+)["']/);
-        const finalUrl = match ? match[1] : "";
+        // مراقبة تغييرات الـ iframe وتطبيق الفلاتر
+        page.on('framenavigated', async (frame) => {
+            const url = frame.url();
+            
+            // قائمة الإعلانات والمواقع المزعجة التي نريد تجاهلها
+            const blockedDomains = ['llvpn.com', 'google-analytics', 'googletagmanager', 'ads', 'adserver', 'pop'];
+            
+            // قائمة الكلمات الدلالية التي يجب أن يتضمنها رابط الفيديو
+            const validKeywords = ['embed', 'vidtube', 'stream', 'filelion', 'tape', 'drive', 'm3u8'];
+
+            const isAd = blockedDomains.some(domain => url.includes(domain));
+            const isScript = url.endsWith('.js');
+            const isVideoEmbed = validKeywords.some(keyword => url.includes(keyword));
+
+            // الشرط النهائي للقبول: يجب أن يكون فيديو، وليس إعلاناً، وليس سكربت
+            if (isVideoEmbed && !isAd && !isScript) {
+                foundIframe = url;
+            }
+        });
+
+        await page.goto(targetUrl, { waitUntil: 'domcontentloaded', timeout: 15000 });
+
+        // استخراج السيرفرات (باستبعاد متعدد الجودات)
+        const servers = await page.$$eval('li.server--item', els => 
+            els.map((el, i) => ({ index: i, text: el.innerText }))
+               .filter(s => !s.text.includes('متعدد الجودات'))
+        );
+
+        // النقر على السيرفرات بالتوالي حتى يتم التقاط رابط فيديو صحيح
+        for (const s of servers) {
+            if (foundIframe) break; // إذا وجدنا رابطاً صحيحاً، توقف فوراً
+
+            const elements = await page.$$('li.server--item');
+            if (elements[s.index]) {
+                try {
+                    await elements[s.index].click();
+                    // انتظار قصير جداً للسماح بحدوث الـ navigation
+                    await new Promise(r => setTimeout(r, 600)); 
+                } catch (e) { continue; }
+            }
+        }
+
+        await browser.close();
 
         res.setHeader('Content-Type', 'text/plain');
-        res.send(finalUrl);
+        res.send(foundIframe || ""); // إرسال الرابط الصحيح أو نص فارغ
 
     } catch (e) {
+        if (browser) await browser.close();
+        res.setHeader('Content-Type', 'text/plain');
         res.send("");
     }
 });
+
 // ---------------------------------------------------------
 // تشغيل السيرفر
 // ---------------------------------------------------------
