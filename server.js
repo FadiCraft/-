@@ -205,83 +205,59 @@ app.get('/api/watch', async (req, res) => {
     if (!targetUrl) return res.send("");
     if (!targetUrl.endsWith('/watch/')) targetUrl = targetUrl.replace(/\/$/, '') + '/watch/';
 
-    let browser;
-    let foundIframe = "";
+    console.log("=== بدء محاولة استخراج الرابط من:", targetUrl);
 
+    let browser;
     try {
         browser = await puppeteer.launch({
             headless: true,
-            args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage', '--disable-gpu']
+            args: ['--no-sandbox', '--disable-setuid-sandbox']
         });
 
         const page = await browser.newPage();
+        await page.goto(targetUrl, { waitUntil: 'domcontentloaded', timeout: 20000 });
         
-        // إعدادات الأداء: منع كل ما يبطئ الصفحة
-        await page.setRequestInterception(true);
-        page.on('request', (req) => {
-            const type = req.resourceType();
-            if (['image', 'stylesheet', 'font', 'script'].includes(type)) {
-                req.abort();
-            } else {
-                req.continue();
-            }
-        });
+        console.log("تم تحميل الصفحة بنجاح.");
 
-        // مراقبة الروابط وتصفية النتائج فوراً
-        page.on('framenavigated', async (frame) => {
-            const url = frame.url();
+        // استخراج السيرفرات
+        const servers = await page.$$eval('li.server--item', els => els.length);
+        console.log("عدد السيرفرات الموجودة:", servers);
+
+        let foundIframe = "";
+
+        // حلقة النقر مع طباعة الحالة
+        for (let i = 0; i < servers; i++) {
+            console.log("محاولة النقر على السيرفر رقم:", i);
             
-            // قائمة الإعلانات المزعجة
-            const blockedDomains = ['llvpn.com', 'google-analytics', 'googletagmanager', 'ads', 'adserver', 'pop'];
-            
-            // 🚫 قائمة الروابط الممنوعة (هنا حذفنا vidtube.one)
-            const forbiddenLinks = ['vidtube.one', 'multi-quality', 'other-bad-domain'];
-
-            // الكلمات الدلالية للروابط "الصالحة"
-            const validKeywords = ['embed', 'stream', 'filelion', 'tape', 'drive', 'm3u8'];
-
-            const isAd = blockedDomains.some(domain => url.includes(domain));
-            const isForbidden = forbiddenLinks.some(link => url.includes(link));
-            const isScript = url.endsWith('.js');
-            const isVideoEmbed = validKeywords.some(keyword => url.includes(keyword));
-
-            // قبول الرابط فقط إذا كان "فيديو" وليس "إعلاناً" وليس "ممنوعاً"
-            if (isVideoEmbed && !isAd && !isScript && !isForbidden) {
-                foundIframe = url;
-            }
-        });
-
-        await page.goto(targetUrl, { waitUntil: 'domcontentloaded', timeout: 15000 });
-
-        // استخراج السيرفرات (باستثناء "متعدد الجودات" من القائمة الأساسية)
-        const servers = await page.$$eval('li.server--item', els => 
-            els.map((el, i) => ({ index: i, text: el.innerText }))
-               .filter(s => !s.text.includes('متعدد الجودات'))
-        );
-
-        // النقر على السيرفرات بالترتيب
-        for (const s of servers) {
-            if (foundIframe) break; // توقف فوراً إذا وجدنا رابطاً صحيحاً
-
             const elements = await page.$$('li.server--item');
-            if (elements[s.index]) {
-                try {
-                    await elements[s.index].click();
-                    // انتظار قصير جداً للسماح للموقع بتغيير الـ iframe
-                    await new Promise(r => setTimeout(r, 600)); 
-                } catch (e) { continue; }
+            if (elements[i]) {
+                await elements[i].click();
+                await new Promise(r => setTimeout(r, 1000)); // انتظر ثانية
+
+                // فحص الـ iframe
+                const src = await page.evaluate(() => {
+                    const iframe = document.querySelector('iframe');
+                    return iframe ? iframe.src : null;
+                });
+
+                console.log("الرابط المكتشف في السيرفر", i, ":", src);
+
+                if (src && src.includes('embed') && !src.includes('vidtube')) {
+                    foundIframe = src;
+                    console.log("تم العثور على رابط صحيح:", foundIframe);
+                    break;
+                }
             }
         }
 
         await browser.close();
-
         res.setHeader('Content-Type', 'text/plain');
-        res.send(foundIframe || "");
+        res.send(foundIframe || "لم يتم العثور على رابط");
 
     } catch (e) {
+        console.log("خطأ في الكود:", e.message);
         if (browser) await browser.close();
-        res.setHeader('Content-Type', 'text/plain');
-        res.send("");
+        res.send("خطأ: " + e.message);
     }
 });
 // ---------------------------------------------------------
