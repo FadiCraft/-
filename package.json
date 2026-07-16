@@ -1,13 +1,14 @@
 {
-  "name": "egydead-api",
+  "name": "universal-server-extractor",
   "version": "1.0.0",
-  "description": "API for fetching streaming servers using Puppeteer",
+  "description": "API to extract streaming servers from non-protected sites",
   "main": "server.js",
   "scripts": {
     "start": "node server.js"
   },
   "dependencies": {
     "express": "^4.18.2",
-    "puppeteer": "^22.12.0"
+    "axios": "^1.6.0",
+    "cheerio": "^1.0.0-rc.12"
   }
 }
