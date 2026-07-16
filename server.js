@@ -1,13 +1,12 @@
 const express = require('express');
 const cheerio = require('cheerio');
-const crypto = require('crypto'); // مكتبة مدمجة في Node.js لإنشاء المعرفات
+const crypto = require('crypto');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
 
 app.use(express.json());
 
-// الهيكل الثابت في حال وجود خطأ أو عدم وجود بيانات
 const emptyResponse = {
     id: "",
     title: "",
@@ -21,7 +20,6 @@ const emptyResponse = {
 app.get('/api/page', async (req, res) => {
     const targetUrl = req.query.url;
 
-    // في حال لم يقم المستخدم بإرسال الرابط
     if (!targetUrl) {
         return res.json([emptyResponse]);
     }
@@ -33,7 +31,6 @@ app.get('/api/page', async (req, res) => {
             }
         });
 
-        // في حال كان الموقع معطلاً أو الرابط خاطئاً
         if (!response.ok) {
             return res.json([emptyResponse]);
         }
@@ -45,10 +42,12 @@ app.get('/api/page', async (req, res) => {
         $('div.Small--Box').each((index, element) => {
             const box = $(element);
 
-            // استخراج القيم الأساسية أو تركها فارغة
             const movieUrl = box.find('a.recent--block').attr('href') || "";
             const title = box.find('h3.title').text().trim() || "";
-            const imageUrl = box.find('div.Poster img').attr('src') || "";
+            
+            // التعديل هنا: سحب الصورة من خصائص الـ Lazy Load أولاً
+            const imgTag = box.find('div.Poster img');
+            const imageUrl = imgTag.attr('data-src') || imgTag.attr('data-lazy-src') || imgTag.attr('src') || "";
 
             let genre = "";
             let quality = "";
@@ -58,13 +57,11 @@ app.get('/api/page', async (req, res) => {
                 const text = $(li).text().trim();
 
                 if ($(li).hasClass('imdbRating')) {
-                    // استخراج الرقم الخاص بالتقييم فقط
                     imdbRating = text.replace(/[^\d.]/g, ''); 
                 } else {
                     if (/p|web|bluray|hd|cam/i.test(text)) {
                         quality = text;
                     } else {
-                        // أخذ تصنيف واحد فقط وتجاهل البقية
                         if (!genre) {
                             genre = text;
                         }
@@ -72,8 +69,6 @@ app.get('/api/page', async (req, res) => {
                 }
             });
 
-            // إنشاء معرف (ID) فريد وثابت بناءً على رابط الفيلم
-            // هكذا نضمن أن المعرف غير عشوائي وثابت لنفس الفيلم دائماً
             const id = movieUrl ? crypto.createHash('md5').update(movieUrl).digest('hex') : "";
 
             moviesList.push({
@@ -87,17 +82,14 @@ app.get('/api/page', async (req, res) => {
             });
         });
 
-        // إذا كانت الصفحة فارغة ولا يوجد بها أفلام
         if (moviesList.length === 0) {
             return res.json([emptyResponse]);
         }
 
-        // إرجاع البيانات بنجاح
         res.setHeader('Content-Type', 'application/json; charset=utf-8');
         res.json(moviesList);
 
     } catch (error) {
-        // في حال حدوث أي خطأ برمجي يتم إرجاع الهيكل الفارغ
         res.json([emptyResponse]);
     }
 });
