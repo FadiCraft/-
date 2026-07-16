@@ -202,85 +202,59 @@ app.get('/api/episodes', async (req, res) => {
 // ---------------------------------------------------------
 app.get('/api/watch', async (req, res) => {
     let targetUrl = req.query.url;
-
-    if (!targetUrl) {
-        return res.send("");
-    }
-
-    // إضافة watch/ للرابط إذا لم تكن موجودة
-    if (!targetUrl.endsWith('/watch/')) {
-        targetUrl = targetUrl.replace(/\/$/, '') + '/watch/';
-    }
+    if (!targetUrl) return res.send("");
+    if (!targetUrl.endsWith('/watch/')) targetUrl = targetUrl.replace(/\/$/, '') + '/watch/';
 
     let browser;
     try {
-        // تشغيل المتصفح بأقصى سرعة ممكنة عبر تعطيل الرسوميات والخطوط
-        browser = await puppeteer.launch({
-            headless: true,
-            args: [
-                '--no-sandbox', 
-                '--disable-setuid-sandbox', 
-                '--disable-dev-shm-usage', 
-                '--disable-gpu', 
-                '--no-first-run', 
-                '--no-zygote', 
-                '--single-process'
-            ]
-        });
-
+        browser = await puppeteer.launch({ headless: true, args: ['--no-sandbox'] });
         const page = await browser.newPage();
         
-        // 1. سرعة إضافية: حظر تحميل الصور، الستايلات، والخطوط لتسريع الصفحة
+        // تعطيل كل شيء غير ضروري
         await page.setRequestInterception(true);
         page.on('request', (req) => {
-            const type = req.resourceType();
-            if (['image', 'stylesheet', 'font', 'media'].includes(type)) {
-                req.abort();
-            } else {
-                req.continue();
-            }
+            if (['image', 'stylesheet', 'font'].includes(req.resourceType())) req.abort();
+            else req.continue();
         });
 
-        let foundIframe = "";
-        
-        // 2. الانتظار الذكي: مراقبة أي iframe يظهر في الشبكة بمجرد تحميله
-        page.on('framenavigated', async (frame) => {
-            const url = frame.url();
-            // التقاط أي رابط يحتوي على كلمات تدل على سيرفرات الفيديو
-            if (url.includes('embed') || url.includes('vidtube') || url.includes('stream') || url.includes('filelion') || url.includes('tape')) {
-                foundIframe = url;
-            }
-        });
+        await page.goto(targetUrl, { waitUntil: 'domcontentloaded' });
 
-        // الدخول للصفحة
-        await page.goto(targetUrl, { waitUntil: 'domcontentloaded', timeout: 25000 });
-
-        // 3. النقر الذكي: استخراج السيرفرات (باستثناء متعدد الجودات)
         const servers = await page.$$eval('li.server--item', els => 
             els.map((el, i) => ({ index: i, text: el.innerText }))
                .filter(s => !s.text.includes('متعدد الجودات'))
         );
 
-        // النقر على السيرفرات بالتوالي حتى يتم التقاط الرابط
+        let finalUrl = "";
+
         for (const s of servers) {
-            if (foundIframe) break;
+            // "الاستماع" لرد السيرفر قبل الضغط
+            const responsePromise = page.waitForResponse(response => 
+                response.url().includes('admin-ajax.php') || response.status() === 200
+            );
+
             const elements = await page.$$('li.server--item');
-            if (elements[s.index]) {
-                await elements[s.index].click();
-                // انتظار قصير جداً (800ms) للسماح بتحديث الـ iframe
-                await new Promise(r => setTimeout(r, 800)); 
-            }
-            if (foundIframe) break;
+            await elements[s.index].click();
+
+            try {
+                // الانتظار فقط حتى يأتي الرد (أسرع من الانتظار الثابت)
+                const response = await responsePromise;
+                const text = await response.text();
+                
+                // البحث عن الرابط داخل الرد
+                const match = text.match(/https?:\/\/[^\s"']+/);
+                if (match && (match[0].includes('embed') || match[0].includes('vidtube'))) {
+                    finalUrl = match[0];
+                    break;
+                }
+            } catch (e) { continue; }
         }
 
         await browser.close();
-
         res.setHeader('Content-Type', 'text/plain');
-        res.send(foundIframe || "");
+        res.send(finalUrl || "");
 
     } catch (e) {
         if (browser) await browser.close();
-        res.setHeader('Content-Type', 'text/plain');
         res.send("");
     }
 });
