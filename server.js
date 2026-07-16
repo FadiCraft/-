@@ -200,58 +200,39 @@ app.get('/api/episodes', async (req, res) => {
 // ---------------------------------------------------------
 // المسار الرابع: استخراج رابط السيرفر (iframe) السريع والمباشر
 // ---------------------------------------------------------
+const axios = require('axios'); // تأكد من إضافة axios للمشروع عبر npm install axios
+
 app.get('/api/watch', async (req, res) => {
-    let targetUrl = req.query.url;
+    const targetUrl = req.query.url; // الرابط الذي أرسلته
     if (!targetUrl) return res.send("");
-    if (!targetUrl.endsWith('/watch/')) targetUrl = targetUrl.replace(/\/$/, '') + '/watch/';
 
-    let browser;
     try {
-        browser = await puppeteer.launch({ 
-            headless: true, 
-            args: ['--no-sandbox', '--disable-setuid-sandbox'] 
-        });
-        const page = await browser.newPage();
+        // 1. استخراج الـ ID الخاص بالفيلم من الرابط (هنا ستحتاج لفتحه مرة واحدة بجافاسكريبت خفيف)
+        // وبما أننا لا نريد فتح متصفح، سنستخدم استراتيجية الحصول على ID
+        // ولكن للتجربة، جرب هذا الطلب المباشر:
         
-        // تحسين الأداء: حظر كل شيء غير الـ iframe
-        await page.setRequestInterception(true);
-        page.on('request', (req) => {
-            if (['image', 'stylesheet', 'font'].includes(req.resourceType())) req.abort();
-            else req.continue();
+        // ملاحظة: أنت تحتاج لمعرفة ID الفيلم و رقم السيرفر
+        // إذا كان لديك ID الفيلم من قائمة الأفلام (data-id)، استخدمه هنا:
+        const postId = req.query.id; 
+        const serverId = req.query.server || 0;
+
+        const response = await axios.post('https://topcinma.com/wp-admin/admin-ajax.php', 
+            `action=get_player&id=${postId}&server=${serverId}`, {
+            headers: {
+                'Content-Type': 'application/x-www-form-urlencoded',
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'
+            }
         });
 
-        await page.goto(targetUrl, { waitUntil: 'domcontentloaded', timeout: 15000 });
+        // استخراج الرابط من الرد (غالباً ما يكون iframe أو رابط مباشر)
+        const html = response.data;
+        const match = html.match(/src=["'](https?:\/\/[^"']+)["']/);
+        const finalUrl = match ? match[1] : "";
 
-        // استخراج السيرفرات (باستبعاد متعدد الجودات)
-        const serverSelectors = await page.$$('li.server--item:not(:contains("متعدد الجودات"))');
-        
-        let foundUrl = "";
-
-        // فحص السيرفر الأول فقط (للتجربة والسرعة) أو يمكنك عمل حلقة تكرار إذا فشل الأول
-        if (serverSelectors.length > 0) {
-            // نأخذ السيرفر الثاني (عادة يكون أول سيرفر حقيقي بعد متعدد الجودات)
-            const targetServer = serverSelectors[0]; 
-            
-            // تسجيل الرابط القديم قبل الضغط
-            const oldSrc = await page.evaluate(() => document.querySelector('iframe')?.src);
-
-            await targetServer.click();
-
-            // الانتظار حتى يتغير رابط الـ iframe (أسرع من الانتظار بالثواني)
-            foundUrl = await page.waitForFunction((old) => {
-                const iframe = document.querySelector('iframe');
-                return (iframe && iframe.src !== old && iframe.src.includes('http')) ? iframe.src : null;
-            }, { timeout: 5000 }, oldSrc).catch(() => null);
-
-            if (foundUrl) foundUrl = foundUrl.remoteObject().value;
-        }
-
-        await browser.close();
         res.setHeader('Content-Type', 'text/plain');
-        res.send(foundUrl || "");
+        res.send(finalUrl);
 
     } catch (e) {
-        if (browser) await browser.close();
         res.send("");
     }
 });
