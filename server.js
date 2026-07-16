@@ -203,91 +203,82 @@ app.get('/api/episodes', async (req, res) => {
 app.get('/api/watch', async (req, res) => {
     let targetUrl = req.query.url;
 
-    if (!targetUrl) return res.send("");
+    if (!targetUrl) {
+        return res.send("");
+    }
 
+    // إضافة watch/ للرابط إذا لم تكن موجودة
     if (!targetUrl.endsWith('/watch/')) {
         targetUrl = targetUrl.replace(/\/$/, '') + '/watch/';
     }
 
     let browser;
     try {
+        // تشغيل المتصفح بأقصى سرعة ممكنة عبر تعطيل الرسوميات والخطوط
         browser = await puppeteer.launch({
             headless: true,
             args: [
-                '--no-sandbox',
-                '--disable-setuid-sandbox',
-                '--disable-dev-shm-usage',
-                '--disable-web-security'
+                '--no-sandbox', 
+                '--disable-setuid-sandbox', 
+                '--disable-dev-shm-usage', 
+                '--disable-gpu', 
+                '--no-first-run', 
+                '--no-zygote', 
+                '--single-process'
             ]
         });
 
         const page = await browser.newPage();
         
-        // 🚀 تسريع التصفح بشكل خيالي عبر حظر الصور والستايلات والخطوط
+        // 1. سرعة إضافية: حظر تحميل الصور، الستايلات، والخطوط لتسريع الصفحة
         await page.setRequestInterception(true);
-        page.on('request', (request) => {
-            const resourceType = request.resourceType();
-            if (['image', 'stylesheet', 'font', 'media'].includes(resourceType)) {
-                request.abort(); // منع التحميل لتسريع العملية
+        page.on('request', (req) => {
+            const type = req.resourceType();
+            if (['image', 'stylesheet', 'font', 'media'].includes(type)) {
+                req.abort();
             } else {
-                request.continue();
+                req.continue();
             }
         });
 
-        await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36');
+        let foundIframe = "";
         
-        // الدخول للصفحة (لن تأخذ سوى ثانية أو ثانيتين الآن)
-        await page.goto(targetUrl, { waitUntil: 'domcontentloaded', timeout: 30000 });
-
-        // استخراج السيرفرات واستبعاد "متعدد الجودات"
-        const servers = await page.$$eval('li.server--item', (items) => {
-            let list = [];
-            items.forEach((item, index) => {
-                const text = item.innerText.trim();
-                // أضف السيرفر للقائمة فقط إذا لم يكن "متعدد الجودات"
-                if (!text.includes('متعدد الجودات')) {
-                    list.push({ index: index, text: text });
-                }
-            });
-            return list;
+        // 2. الانتظار الذكي: مراقبة أي iframe يظهر في الشبكة بمجرد تحميله
+        page.on('framenavigated', async (frame) => {
+            const url = frame.url();
+            // التقاط أي رابط يحتوي على كلمات تدل على سيرفرات الفيديو
+            if (url.includes('embed') || url.includes('vidtube') || url.includes('stream') || url.includes('filelion') || url.includes('tape')) {
+                foundIframe = url;
+            }
         });
 
-        let workingIframeSrc = "";
+        // الدخول للصفحة
+        await page.goto(targetUrl, { waitUntil: 'domcontentloaded', timeout: 25000 });
 
-        // فحص السيرفرات بالترتيب
-        for (const server of servers) {
-            try {
-                const serverElements = await page.$$('li.server--item');
-                if (serverElements[server.index]) {
-                    await serverElements[server.index].click();
-                    
-                    // انتظار 1.5 ثانية فقط ليتم تحديث كود الـ iframe في الصفحة
-                    await new Promise(r => setTimeout(r, 1500)); 
+        // 3. النقر الذكي: استخراج السيرفرات (باستثناء متعدد الجودات)
+        const servers = await page.$$eval('li.server--item', els => 
+            els.map((el, i) => ({ index: i, text: el.innerText }))
+               .filter(s => !s.text.includes('متعدد الجودات'))
+        );
 
-                    // سحب رابط الـ iframe الجديد
-                    const iframeSrc = await page.$eval('iframe', el => el.src).catch(() => "");
-                    
-                    if (iframeSrc && iframeSrc.startsWith('http')) {
-                        // فحص سريع جداً لمعرفة إذا كان رابط السيرفر يعمل فعلياً
-                        const check = await fetch(iframeSrc, { method: 'HEAD' }).catch(() => null);
-                        if (check && check.ok) {
-                            workingIframeSrc = iframeSrc;
-                            break; // وجدنا سيرفر شغال! توقف عن الفحص فوراً
-                        }
-                    }
-                }
-            } catch (e) {
-                continue; // السيرفر هذا فيه مشكلة، انتقل للمحاولة مع السيرفر التالي
+        // النقر على السيرفرات بالتوالي حتى يتم التقاط الرابط
+        for (const s of servers) {
+            if (foundIframe) break;
+            const elements = await page.$$('li.server--item');
+            if (elements[s.index]) {
+                await elements[s.index].click();
+                // انتظار قصير جداً (800ms) للسماح بتحديث الـ iframe
+                await new Promise(r => setTimeout(r, 800)); 
             }
+            if (foundIframe) break;
         }
 
         await browser.close();
-        
-        // إرسال رابط السيرفر فقط كنص عادي
-        res.setHeader('Content-Type', 'text/plain');
-        res.send(workingIframeSrc || "");
 
-    } catch (error) {
+        res.setHeader('Content-Type', 'text/plain');
+        res.send(foundIframe || "");
+
+    } catch (e) {
         if (browser) await browser.close();
         res.setHeader('Content-Type', 'text/plain');
         res.send("");
