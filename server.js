@@ -198,66 +198,99 @@ app.get('/api/episodes', async (req, res) => {
 });
 
 // ---------------------------------------------------------
-// المسار الرابع: استخراج رابط السيرفر (iframe) النهائي والأمثل
+// المسار الرابع: استخراج رابط السيرفر (iframe) السريع والمباشر
 // ---------------------------------------------------------
 app.get('/api/watch', async (req, res) => {
     let targetUrl = req.query.url;
-    if (!targetUrl) return res.send("");
-    if (!targetUrl.endsWith('/watch/')) targetUrl = targetUrl.replace(/\/$/, '') + '/watch/';
 
-    console.log("=== بدء محاولة استخراج الرابط من:", targetUrl);
+    if (!targetUrl) return res.send("");
+
+    if (!targetUrl.endsWith('/watch/')) {
+        targetUrl = targetUrl.replace(/\/$/, '') + '/watch/';
+    }
 
     let browser;
     try {
         browser = await puppeteer.launch({
             headless: true,
-            args: ['--no-sandbox', '--disable-setuid-sandbox']
+            args: [
+                '--no-sandbox',
+                '--disable-setuid-sandbox',
+                '--disable-dev-shm-usage',
+                '--disable-web-security'
+            ]
         });
 
         const page = await browser.newPage();
-        await page.goto(targetUrl, { waitUntil: 'domcontentloaded', timeout: 20000 });
         
-        console.log("تم تحميل الصفحة بنجاح.");
+        // 🚀 تسريع التصفح بشكل خيالي عبر حظر الصور والستايلات والخطوط
+        await page.setRequestInterception(true);
+        page.on('request', (request) => {
+            const resourceType = request.resourceType();
+            if (['image', 'stylesheet', 'font', 'media'].includes(resourceType)) {
+                request.abort(); // منع التحميل لتسريع العملية
+            } else {
+                request.continue();
+            }
+        });
 
-        // استخراج السيرفرات
-        const servers = await page.$$eval('li.server--item', els => els.length);
-        console.log("عدد السيرفرات الموجودة:", servers);
+        await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36');
+        
+        // الدخول للصفحة (لن تأخذ سوى ثانية أو ثانيتين الآن)
+        await page.goto(targetUrl, { waitUntil: 'domcontentloaded', timeout: 30000 });
 
-        let foundIframe = "";
-
-        // حلقة النقر مع طباعة الحالة
-        for (let i = 0; i < servers; i++) {
-            console.log("محاولة النقر على السيرفر رقم:", i);
-            
-            const elements = await page.$$('li.server--item');
-            if (elements[i]) {
-                await elements[i].click();
-                await new Promise(r => setTimeout(r, 1000)); // انتظر ثانية
-
-                // فحص الـ iframe
-                const src = await page.evaluate(() => {
-                    const iframe = document.querySelector('iframe');
-                    return iframe ? iframe.src : null;
-                });
-
-                console.log("الرابط المكتشف في السيرفر", i, ":", src);
-
-                if (src && src.includes('embed') && !src.includes('vidtube')) {
-                    foundIframe = src;
-                    console.log("تم العثور على رابط صحيح:", foundIframe);
-                    break;
+        // استخراج السيرفرات واستبعاد "متعدد الجودات"
+        const servers = await page.$$eval('li.server--item', (items) => {
+            let list = [];
+            items.forEach((item, index) => {
+                const text = item.innerText.trim();
+                // أضف السيرفر للقائمة فقط إذا لم يكن "متعدد الجودات"
+                if (!text.includes('متعدد الجودات')) {
+                    list.push({ index: index, text: text });
                 }
+            });
+            return list;
+        });
+
+        let workingIframeSrc = "";
+
+        // فحص السيرفرات بالترتيب
+        for (const server of servers) {
+            try {
+                const serverElements = await page.$$('li.server--item');
+                if (serverElements[server.index]) {
+                    await serverElements[server.index].click();
+                    
+                    // انتظار 1.5 ثانية فقط ليتم تحديث كود الـ iframe في الصفحة
+                    await new Promise(r => setTimeout(r, 1500)); 
+
+                    // سحب رابط الـ iframe الجديد
+                    const iframeSrc = await page.$eval('iframe', el => el.src).catch(() => "");
+                    
+                    if (iframeSrc && iframeSrc.startsWith('http')) {
+                        // فحص سريع جداً لمعرفة إذا كان رابط السيرفر يعمل فعلياً
+                        const check = await fetch(iframeSrc, { method: 'HEAD' }).catch(() => null);
+                        if (check && check.ok) {
+                            workingIframeSrc = iframeSrc;
+                            break; // وجدنا سيرفر شغال! توقف عن الفحص فوراً
+                        }
+                    }
+                }
+            } catch (e) {
+                continue; // السيرفر هذا فيه مشكلة، انتقل للمحاولة مع السيرفر التالي
             }
         }
 
         await browser.close();
+        
+        // إرسال رابط السيرفر فقط كنص عادي
         res.setHeader('Content-Type', 'text/plain');
-        res.send(foundIframe || "لم يتم العثور على رابط");
+        res.send(workingIframeSrc || "");
 
-    } catch (e) {
-        console.log("خطأ في الكود:", e.message);
+    } catch (error) {
         if (browser) await browser.close();
-        res.send("خطأ: " + e.message);
+        res.setHeader('Content-Type', 'text/plain');
+        res.send("");
     }
 });
 // ---------------------------------------------------------
