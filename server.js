@@ -198,7 +198,7 @@ app.get('/api/episodes', async (req, res) => {
 });
 
 // ---------------------------------------------------------
-// المسار الرابع: استخراج رابط السيرفر (iframe) مع فلترة الإعلانات
+// المسار الرابع: استخراج رابط السيرفر (iframe) النهائي والأمثل
 // ---------------------------------------------------------
 app.get('/api/watch', async (req, res) => {
     let targetUrl = req.query.url;
@@ -206,7 +206,7 @@ app.get('/api/watch', async (req, res) => {
     if (!targetUrl.endsWith('/watch/')) targetUrl = targetUrl.replace(/\/$/, '') + '/watch/';
 
     let browser;
-    let foundIframe = ""; // متغير لتخزين الرابط الصحيح فقط
+    let foundIframe = "";
 
     try {
         browser = await puppeteer.launch({
@@ -216,7 +216,7 @@ app.get('/api/watch', async (req, res) => {
 
         const page = await browser.newPage();
         
-        // إعدادات أداء صارمة لمنع تحميل كل ما هو غير ضروري
+        // إعدادات الأداء: منع كل ما يبطئ الصفحة
         await page.setRequestInterception(true);
         page.on('request', (req) => {
             const type = req.resourceType();
@@ -227,43 +227,47 @@ app.get('/api/watch', async (req, res) => {
             }
         });
 
-        // مراقبة تغييرات الـ iframe وتطبيق الفلاتر
+        // مراقبة الروابط وتصفية النتائج فوراً
         page.on('framenavigated', async (frame) => {
             const url = frame.url();
             
-            // قائمة الإعلانات والمواقع المزعجة التي نريد تجاهلها
+            // قائمة الإعلانات المزعجة
             const blockedDomains = ['llvpn.com', 'google-analytics', 'googletagmanager', 'ads', 'adserver', 'pop'];
             
-            // قائمة الكلمات الدلالية التي يجب أن يتضمنها رابط الفيديو
-            const validKeywords = ['embed', 'vidtube', 'stream', 'filelion', 'tape', 'drive', 'm3u8'];
+            // 🚫 قائمة الروابط الممنوعة (هنا حذفنا vidtube.one)
+            const forbiddenLinks = ['vidtube.one', 'multi-quality', 'other-bad-domain'];
+
+            // الكلمات الدلالية للروابط "الصالحة"
+            const validKeywords = ['embed', 'stream', 'filelion', 'tape', 'drive', 'm3u8'];
 
             const isAd = blockedDomains.some(domain => url.includes(domain));
+            const isForbidden = forbiddenLinks.some(link => url.includes(link));
             const isScript = url.endsWith('.js');
             const isVideoEmbed = validKeywords.some(keyword => url.includes(keyword));
 
-            // الشرط النهائي للقبول: يجب أن يكون فيديو، وليس إعلاناً، وليس سكربت
-            if (isVideoEmbed && !isAd && !isScript) {
+            // قبول الرابط فقط إذا كان "فيديو" وليس "إعلاناً" وليس "ممنوعاً"
+            if (isVideoEmbed && !isAd && !isScript && !isForbidden) {
                 foundIframe = url;
             }
         });
 
         await page.goto(targetUrl, { waitUntil: 'domcontentloaded', timeout: 15000 });
 
-        // استخراج السيرفرات (باستبعاد متعدد الجودات)
+        // استخراج السيرفرات (باستثناء "متعدد الجودات" من القائمة الأساسية)
         const servers = await page.$$eval('li.server--item', els => 
             els.map((el, i) => ({ index: i, text: el.innerText }))
                .filter(s => !s.text.includes('متعدد الجودات'))
         );
 
-        // النقر على السيرفرات بالتوالي حتى يتم التقاط رابط فيديو صحيح
+        // النقر على السيرفرات بالترتيب
         for (const s of servers) {
-            if (foundIframe) break; // إذا وجدنا رابطاً صحيحاً، توقف فوراً
+            if (foundIframe) break; // توقف فوراً إذا وجدنا رابطاً صحيحاً
 
             const elements = await page.$$('li.server--item');
             if (elements[s.index]) {
                 try {
                     await elements[s.index].click();
-                    // انتظار قصير جداً للسماح بحدوث الـ navigation
+                    // انتظار قصير جداً للسماح للموقع بتغيير الـ iframe
                     await new Promise(r => setTimeout(r, 600)); 
                 } catch (e) { continue; }
             }
@@ -272,7 +276,7 @@ app.get('/api/watch', async (req, res) => {
         await browser.close();
 
         res.setHeader('Content-Type', 'text/plain');
-        res.send(foundIframe || ""); // إرسال الرابط الصحيح أو نص فارغ
+        res.send(foundIframe || "");
 
     } catch (e) {
         if (browser) await browser.close();
@@ -280,7 +284,6 @@ app.get('/api/watch', async (req, res) => {
         res.send("");
     }
 });
-
 // ---------------------------------------------------------
 // تشغيل السيرفر
 // ---------------------------------------------------------
