@@ -1,14 +1,13 @@
 {
-  "name": "universal-server-extractor",
+  "name": "movie-scraper-api",
   "version": "1.0.0",
-  "description": "API to extract streaming servers from non-protected sites",
+  "description": "Scrape movie data and return as JSON",
   "main": "server.js",
   "scripts": {
     "start": "node server.js"
   },
   "dependencies": {
-    "express": "^4.18.2",
-    "axios": "^1.6.0",
-    "cheerio": "^1.0.0-rc.12"
+    "cheerio": "^1.0.0-rc.12",
+    "express": "^4.19.2"
   }
 }
