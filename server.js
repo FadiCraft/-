@@ -206,8 +206,15 @@ app.get('/api/episodes', async (req, res) => {
 
 
 
+
+
+
+
+
+
+
 // ---------------------------------------------------------
-// المسار السريع لاستخراج السيرفر (النسخة النهائية والمحسنة)
+// المسار السريع لاستخراج السيرفر (النسخة النهائية المؤكدة)
 // ---------------------------------------------------------
 app.get('/api/watch', async (req, res) => {
     let targetUrl = req.query.url;
@@ -218,6 +225,8 @@ app.get('/api/watch', async (req, res) => {
     }
 
     try {
+        console.log(`[1] جاري فحص الرابط: ${targetUrl}`);
+
         // 1. جلب صفحة المشاهدة
         const pageResponse = await fetch(targetUrl, {
             headers: { 
@@ -226,59 +235,75 @@ app.get('/api/watch', async (req, res) => {
             }
         });
 
-        if (!pageResponse.ok) return res.send("");
+        if (!pageResponse.ok) {
+            console.log("❌ فشل في جلب الصفحة الأساسية.");
+            return res.send("");
+        }
         
         const pageHtml = await pageResponse.text();
         const $ = cheerio.load(pageHtml);
 
-        // 🔥 استخراج الـ ID المباشر من أول سيرفر متاح بناءً على اكتشافك
+        // 2. استخراج الـ ID بدقة كما اكتشفت أنت
         const firstServerBtn = $('.server--item').first();
         const postId = firstServerBtn.attr('data-id') || "";
 
         if (!postId) {
-            console.log("❌ لم يتم العثور على data-id في الصفحة.");
+            console.log("❌ لم يتم العثور على data-id في الصفحة. تأكد من أن الرابط يحتوي على سيرفرات.");
             return res.send("");
         }
 
-        // 2. إعداد البيانات المرسلة
-        const serverUrl = "https://topcinma.com/wp-content/themes/movies2023/Ajaxat/Single/Server.php";
-        const payload = new URLSearchParams();
-        payload.append('id', postId);
-        
-        // 💡 ملاحظة: السيرفر رقم 0 هو "متعدد الجودات"، أحياناً يكون مجرد صفحة إعلانات أو مشغل داخلي.
-        // إذا أردت سيرفر UpDown المباشر، يمكنك استخدام '1' بدلاً من '0' (حسب ترتيبهم في الـ HTML).
-        payload.append('i', '1'); 
+        console.log(`[2] تم التقاط ID بنجاح: ${postId}`);
 
-        // 3. إرسال طلب POST
+        // 3. إرسال طلب POST بالضبط كما فعلنا في كونسول المتصفح
+        const serverUrl = "https://topcinma.com/wp-content/themes/movies2023/Ajaxat/Single/Server.php";
+        
+        // استخدمنا صيغة النص المباشر لأنها نجحت معك في الصورة
+        const payloadString = `id=${postId}&i=1`; 
+
         const serverResponse = await fetch(serverUrl, {
             method: 'POST',
-            body: payload,
+            body: payloadString,
             headers: {
                 "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)",
                 "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8",
                 "X-Requested-With": "XMLHttpRequest",
-                "Origin": "https://topcinma.com",
                 "Referer": targetUrl
             }
         });
 
-        if (!serverResponse.ok) return res.send("");
+        if (!serverResponse.ok) {
+            console.log("❌ فشل الاتصال بملف Server.php");
+            return res.send("");
+        }
         
         const serverHtml = await serverResponse.text();
         
-        // 4. استخراج رابط iframe
+        // 4. استخراج رابط الـ iframe النظيف من الاستجابة
         const $$ = cheerio.load(serverHtml);
         const iframeSrc = $$('iframe').attr('src') || "";
 
-        res.setHeader('Content-Type', 'text/plain');
-        res.send(iframeSrc);
+        if (iframeSrc) {
+            console.log(`[3] ✅ تم جلب الرابط النهائي: ${iframeSrc}`);
+            res.setHeader('Content-Type', 'text/plain');
+            res.send(iframeSrc);
+        } else {
+            console.log("❌ السيرفر رد بنجاح ولكن لم يحتوي على iframe. الرد كان:", serverHtml);
+            res.send("");
+        }
 
     } catch (error) {
-        console.error("❌ خطأ:", error);
+        console.error("❌ خطأ برمجي:", error);
         res.setHeader('Content-Type', 'text/plain');
         res.send("");
     }
 });
+
+
+
+
+
+
+
 
 
 
