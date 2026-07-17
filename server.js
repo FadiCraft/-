@@ -197,95 +197,102 @@ app.get('/api/episodes', async (req, res) => {
     }
 });
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 // ---------------------------------------------------------
-// المسار السريع لاستخراج السيرفر (النسخة النهائية المؤكدة)
+// المسار الرابع: استخراج رابط السيرفر (iframe) السريع والمباشر
 // ---------------------------------------------------------
-
 app.get('/api/watch', async (req, res) => {
     let targetUrl = req.query.url;
+
     if (!targetUrl) return res.send("");
+
     if (!targetUrl.endsWith('/watch/')) {
         targetUrl = targetUrl.replace(/\/$/, '') + '/watch/';
     }
 
+    let browser;
     try {
-        const pageResponse = await fetch(encodeURI(targetUrl), {
-            headers: { "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)" }
+        browser = await puppeteer.launch({
+            headless: true,
+            args: [
+                '--no-sandbox',
+                '--disable-setuid-sandbox',
+                '--disable-dev-shm-usage',
+                '--disable-web-security'
+            ]
         });
 
-        const pageHtml = await pageResponse.text();
-        const $ = cheerio.load(pageHtml);
-
-        // 1. استخراج الـ ID
-        const firstServerBtn = $('.server--item').first();
-        const postId = firstServerBtn.attr('data-id') || "";
-        if (!postId) return res.send("");
-
-      // 2. استخراج جميع أرقام السيرفرات المتاحة
-        const serverIndexes = [];
-        $('.server--item').each((i, el) => {
-            // إضافة شرط: لا تضف السيرفر إذا كان رقم الفهرس هو 0
-            if (i > 0) { 
-                serverIndexes.push($(el).attr('data-server'));
+        const page = await browser.newPage();
+        
+        // 🚀 تسريع التصفح بشكل خيالي عبر حظر الصور والستايلات والخطوط
+        await page.setRequestInterception(true);
+        page.on('request', (request) => {
+            const resourceType = request.resourceType();
+            if (['image', 'stylesheet', 'font', 'media'].includes(resourceType)) {
+                request.abort(); // منع التحميل لتسريع العملية
+            } else {
+                request.continue();
             }
         });
 
-        // 3. تجربة السيرفرات بالترتيب
-        const serverUrl = "https://topcinma.com/wp-content/themes/movies2023/Ajaxat/Single/Server.php";
+        await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36');
         
-        for (let i of serverIndexes) {
-            const serverResponse = await fetch(serverUrl, {
-                method: 'POST',
-                body: `id=${postId}&i=${i}`,
-                headers: {
-                    "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8",
-                    "X-Requested-With": "XMLHttpRequest",
-                    "Referer": encodeURI(targetUrl)
+        // الدخول للصفحة (لن تأخذ سوى ثانية أو ثانيتين الآن)
+        await page.goto(targetUrl, { waitUntil: 'domcontentloaded', timeout: 30000 });
+
+        // استخراج السيرفرات واستبعاد "متعدد الجودات"
+        const servers = await page.$$eval('li.server--item', (items) => {
+            let list = [];
+            items.forEach((item, index) => {
+                const text = item.innerText.trim();
+                // أضف السيرفر للقائمة فقط إذا لم يكن "متعدد الجودات"
+                if (!text.includes('متعدد الجودات')) {
+                    list.push({ index: index, text: text });
                 }
             });
+            return list;
+        });
 
-            const serverHtml = await serverResponse.text();
-            const $$ = cheerio.load(serverHtml);
-            const iframeSrc = $$('iframe').attr('src') || "";
+        let workingIframeSrc = "";
 
-            // 4. التحقق مما إذا كان الرابط صالحاً (ليس محظوراً أو إعلانياً)
-            const blockedDomains = ['llvpn', 'ads', 'pop', 'blank'];
-            const isBlocked = blockedDomains.some(d => iframeSrc.includes(d));
+        // فحص السيرفرات بالترتيب
+        for (const server of servers) {
+            try {
+                const serverElements = await page.$$('li.server--item');
+                if (serverElements[server.index]) {
+                    await serverElements[server.index].click();
+                    
+                    // انتظار 1.5 ثانية فقط ليتم تحديث كود الـ iframe في الصفحة
+                    await new Promise(r => setTimeout(r, 1500)); 
 
-            if (iframeSrc && iframeSrc.startsWith('http') && !isBlocked) {
-                console.log(`✅ تم العثور على سيرفر صالح (رقم ${i}): ${iframeSrc}`);
-                res.setHeader('Content-Type', 'text/plain');
-                return res.send(iframeSrc);
+                    // سحب رابط الـ iframe الجديد
+                    const iframeSrc = await page.$eval('iframe', el => el.src).catch(() => "");
+                    
+                    if (iframeSrc && iframeSrc.startsWith('http')) {
+                        // فحص سريع جداً لمعرفة إذا كان رابط السيرفر يعمل فعلياً
+                        const check = await fetch(iframeSrc, { method: 'HEAD' }).catch(() => null);
+                        if (check && check.ok) {
+                            workingIframeSrc = iframeSrc;
+                            break; // وجدنا سيرفر شغال! توقف عن الفحص فوراً
+                        }
+                    }
+                }
+            } catch (e) {
+                continue; // السيرفر هذا فيه مشكلة، انتقل للمحاولة مع السيرفر التالي
             }
         }
 
-        console.log("❌ لم يتم العثور على أي سيرفر صالح.");
-        res.send("");
+        await browser.close();
+        
+        // إرسال رابط السيرفر فقط كنص عادي
+        res.setHeader('Content-Type', 'text/plain');
+        res.send(workingIframeSrc || "");
 
     } catch (error) {
-        console.error("خطأ:", error.message);
+        if (browser) await browser.close();
+        res.setHeader('Content-Type', 'text/plain');
         res.send("");
     }
 });
-
-
-
-
-
 // ---------------------------------------------------------
 // تشغيل السيرفر
 // ---------------------------------------------------------
