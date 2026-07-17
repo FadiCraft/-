@@ -207,50 +207,9 @@ app.get('/api/episodes', async (req, res) => {
 
 
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-// تعريف المتصفح كمتغير عام ليعمل مرة واحدة مع تشغيل السيرفر
-let globalBrowser;
-
-(async () => {
-    try {
-        globalBrowser = await puppeteer.launch({
-            headless: true,
-            args: [
-                '--no-sandbox',
-                '--disable-setuid-sandbox',
-                '--disable-dev-shm-usage',
-                '--disable-gpu',
-                '--disable-web-security',
-                '--blink-settings=imagesEnabled=false' // منع الصور من المتصفح نفسه لتسريع هائل
-            ]
-        });
-        console.log("✅ تم تشغيل متصفح Puppeteer بنجاح وجاهز للاستخدام.");
-    } catch (error) {
-        console.error("❌ خطأ في تشغيل المتصفح:", error);
-    }
-})();
-
-// المسار السريع لاستخراج السيرفر
+// ---------------------------------------------------------
+// المسار السريع لاستخراج السيرفر (بدون Puppeteer)
+// ---------------------------------------------------------
 app.get('/api/watch', async (req, res) => {
     let targetUrl = req.query.url;
 
@@ -259,68 +218,71 @@ app.get('/api/watch', async (req, res) => {
         targetUrl = targetUrl.replace(/\/$/, '') + '/watch/';
     }
 
-    if (!globalBrowser) {
-        return res.status(500).send("Browser not initialized yet");
-    }
-
-    let page;
     try {
-        // فتح صفحة جديدة في المتصفح المفتوح مسبقاً (يأخذ أجزاء من الثانية)
-        page = await globalBrowser.newPage();
+        // 1. جلب صفحة المشاهدة لاستخراج رقم الـ ID
+        const pageResponse = await fetch(targetUrl, {
+            headers: { "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)" }
+        });
+
+        if (!pageResponse.ok) return res.send("");
+        const pageHtml = await pageResponse.text();
+        const $ = cheerio.load(pageHtml);
+
+        let postId = "";
+
+        // محاولة استخراج الـ ID من رابط shortlink (الطريقة الأكثر شيوعاً في ووردبريس)
+        const shortlink = $('link[rel="shortlink"]').attr('href');
+        if (shortlink) {
+            const match = shortlink.match(/p=(\d+)/);
+            if (match) postId = match[1];
+        }
+
+        // كخطة بديلة: محاولة استخراجه من كلاسات body (مثل: postid-234417)
+        if (!postId) {
+            const bodyClass = $('body').attr('class') || "";
+            const match = bodyClass.match(/postid-(\d+)/);
+            if (match) postId = match[1];
+        }
+
+        // إذا لم نعثر على الـ ID، نوقف العملية
+        if (!postId) {
+            console.log("لم يتم العثور على رقم ID الخاص بالصفحة.");
+            return res.send("");
+        }
+
+        // 2. إعداد البيانات المرسلة لملف Server.php
+        const serverUrl = "https://topcinma.com/wp-content/themes/movies2023/Ajaxat/Single/Server.php";
         
-        // إيقاف تحميل الموارد غير الضرورية
-        await page.setRequestInterception(true);
-        page.on('request', (request) => {
-            const resourceType = request.resourceType();
-            // ملاحظة: لا تمنع الـ 'script' لأن الموقع يحتاجه لتشغيل السيرفر وتغيير الـ iframe
-            if (['image', 'stylesheet', 'font', 'media'].includes(resourceType)) {
-                request.abort();
-            } else {
-                request.continue();
+        // يجب إرسال البيانات بصيغة x-www-form-urlencoded
+        const payload = new URLSearchParams();
+        payload.append('id', postId);
+        payload.append('i', '0'); // 0 يعني السيرفر الأول، يمكنك تغييره لجلب سيرفرات أخرى
+
+        // 3. إرسال طلب POST لجلب الـ iframe
+        const serverResponse = await fetch(serverUrl, {
+            method: 'POST',
+            body: payload,
+            headers: {
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)",
+                "Content-Type": "application/x-www-form-urlencoded",
+                "Referer": targetUrl // بعض المواقع تتطلب وجود هذا الهيدر للحماية
             }
         });
 
-        // الذهاب للرابط (استخدام domcontentloaded لعدم انتظار الصور والإعلانات)
-        await page.goto(targetUrl, { waitUntil: 'domcontentloaded', timeout: 15000 });
-
-        // حقن كود فحص سريع جداً داخل المتصفح نفسه
-        const iframeUrl = await page.evaluate(async () => {
-            const servers = Array.from(document.querySelectorAll('li.server--item'));
-            const validKeywords = ['embed', 'vidtube', 'stream', 'filelion', 'tape', 'drive', 'm3u8', 'video'];
-            const blockedDomains = ['llvpn.com', 'ads', 'adserver', 'pop'];
-
-            for (let server of servers) {
-                // تخطي "متعدد الجودات"
-                if (server.innerText.includes('متعدد الجودات')) continue;
-
-                server.click();
-                
-                // انتظار 400 جزء من الثانية فقط ليقوم الجافاسكريبت بتحديث الـ iframe
-                await new Promise(r => setTimeout(r, 400));
-                
-                const iframe = document.querySelector('iframe');
-                if (iframe && iframe.src) {
-                    const src = iframe.src.toLowerCase();
-                    
-                    const isAd = blockedDomains.some(domain => src.includes(domain));
-                    const isVideo = validKeywords.some(keyword => src.includes(keyword));
-
-                    if (!isAd && isVideo && src.startsWith('http')) {
-                        return iframe.src; // إرجاع الرابط الأصلي
-                    }
-                }
-            }
-            return ""; // لم يتم العثور على شيء
-        });
-
-        // إغلاق الصفحة فوراً لتفريغ الرام
-        await page.close();
+        if (!serverResponse.ok) return res.send("");
+        
+        const serverHtml = await serverResponse.text();
+        
+        // serverHtml عبارة عن كود <iframe src="..."></iframe>
+        // نستخدم Cheerio مرة أخيرة لاستخراج الرابط النظيف
+        const $$ = cheerio.load(serverHtml);
+        const iframeSrc = $$('iframe').attr('src') || "";
 
         res.setHeader('Content-Type', 'text/plain');
-        res.send(iframeUrl || "");
+        res.send(iframeSrc);
 
     } catch (error) {
-        if (page) await page.close().catch(() => {});
+        console.error("Error in /api/watch:", error);
         res.setHeader('Content-Type', 'text/plain');
         res.send("");
     }
