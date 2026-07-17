@@ -212,8 +212,9 @@ app.get('/api/episodes', async (req, res) => {
 
 
 // ---------------------------------------------------------
-// المسارالرابع لاستخراج السيرفر (النسخة النهائية الكاملة)
+// المسار السريع لاستخراج السيرفر (النسخة النهائية المؤكدة)
 // ---------------------------------------------------------
+
 app.get('/api/watch', async (req, res) => {
     let targetUrl = req.query.url;
     if (!targetUrl) return res.send("");
@@ -234,9 +235,10 @@ app.get('/api/watch', async (req, res) => {
         const postId = firstServerBtn.attr('data-id') || "";
         if (!postId) return res.send("");
 
-        // 2. استخراج جميع أرقام السيرفرات المتاحة مع تخطي السيرفر الأول (index 0)
+      // 2. استخراج جميع أرقام السيرفرات المتاحة
         const serverIndexes = [];
         $('.server--item').each((i, el) => {
+            // إضافة شرط: لا تضف السيرفر إذا كان رقم الفهرس هو 0
             if (i > 0) { 
                 serverIndexes.push($(el).attr('data-server'));
             }
@@ -260,18 +262,14 @@ app.get('/api/watch', async (req, res) => {
             const $$ = cheerio.load(serverHtml);
             const iframeSrc = $$('iframe').attr('src') || "";
 
-            // 4. التحقق مما إذا كان الرابط صالحاً (حظر الروابط الإعلانية أو UpDown)
-            const blockedDomains = ['llvpn', 'ads', 'pop', 'blank', 'updown']; 
+            // 4. التحقق مما إذا كان الرابط صالحاً (ليس محظوراً أو إعلانياً)
+            const blockedDomains = ['llvpn', 'ads', 'pop', 'blank'];
             const isBlocked = blockedDomains.some(d => iframeSrc.includes(d));
 
             if (iframeSrc && iframeSrc.startsWith('http') && !isBlocked) {
                 console.log(`✅ تم العثور على سيرفر صالح (رقم ${i}): ${iframeSrc}`);
-                
-                // هنا الإضافة المطلوبة: دمج الرابط الثابت مع رابط الفيديو
-                const finalUrl = "https://topcinemaa.com/play.php?to=" + iframeSrc;
-                
                 res.setHeader('Content-Type', 'text/plain');
-                return res.send(finalUrl);
+                return res.send(iframeSrc);
             }
         }
 
@@ -283,6 +281,8 @@ app.get('/api/watch', async (req, res) => {
         res.send("");
     }
 });
+
+
 
 
 
