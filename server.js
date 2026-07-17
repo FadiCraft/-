@@ -206,9 +206,8 @@ app.get('/api/episodes', async (req, res) => {
 
 
 
-
 // ---------------------------------------------------------
-// المسار السريع لاستخراج السيرفر (بدون Puppeteer)
+// المسار السريع لاستخراج السيرفر (النسخة النهائية والمحسنة)
 // ---------------------------------------------------------
 app.get('/api/watch', async (req, res) => {
     let targetUrl = req.query.url;
@@ -219,53 +218,47 @@ app.get('/api/watch', async (req, res) => {
     }
 
     try {
-        // 1. جلب صفحة المشاهدة لاستخراج رقم الـ ID
+        // 1. جلب صفحة المشاهدة
         const pageResponse = await fetch(targetUrl, {
-            headers: { "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)" }
+            headers: { 
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)",
+                "Accept-Language": "en-US,en;q=0.9,ar;q=0.8"
+            }
         });
 
         if (!pageResponse.ok) return res.send("");
+        
         const pageHtml = await pageResponse.text();
         const $ = cheerio.load(pageHtml);
 
-        let postId = "";
+        // 🔥 استخراج الـ ID المباشر من أول سيرفر متاح بناءً على اكتشافك
+        const firstServerBtn = $('.server--item').first();
+        const postId = firstServerBtn.attr('data-id') || "";
 
-        // محاولة استخراج الـ ID من رابط shortlink (الطريقة الأكثر شيوعاً في ووردبريس)
-        const shortlink = $('link[rel="shortlink"]').attr('href');
-        if (shortlink) {
-            const match = shortlink.match(/p=(\d+)/);
-            if (match) postId = match[1];
-        }
-
-        // كخطة بديلة: محاولة استخراجه من كلاسات body (مثل: postid-234417)
         if (!postId) {
-            const bodyClass = $('body').attr('class') || "";
-            const match = bodyClass.match(/postid-(\d+)/);
-            if (match) postId = match[1];
-        }
-
-        // إذا لم نعثر على الـ ID، نوقف العملية
-        if (!postId) {
-            console.log("لم يتم العثور على رقم ID الخاص بالصفحة.");
+            console.log("❌ لم يتم العثور على data-id في الصفحة.");
             return res.send("");
         }
 
-        // 2. إعداد البيانات المرسلة لملف Server.php
+        // 2. إعداد البيانات المرسلة
         const serverUrl = "https://topcinma.com/wp-content/themes/movies2023/Ajaxat/Single/Server.php";
-        
-        // يجب إرسال البيانات بصيغة x-www-form-urlencoded
         const payload = new URLSearchParams();
         payload.append('id', postId);
-        payload.append('i', '0'); // 0 يعني السيرفر الأول، يمكنك تغييره لجلب سيرفرات أخرى
+        
+        // 💡 ملاحظة: السيرفر رقم 0 هو "متعدد الجودات"، أحياناً يكون مجرد صفحة إعلانات أو مشغل داخلي.
+        // إذا أردت سيرفر UpDown المباشر، يمكنك استخدام '1' بدلاً من '0' (حسب ترتيبهم في الـ HTML).
+        payload.append('i', '1'); 
 
-        // 3. إرسال طلب POST لجلب الـ iframe
+        // 3. إرسال طلب POST
         const serverResponse = await fetch(serverUrl, {
             method: 'POST',
             body: payload,
             headers: {
                 "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)",
-                "Content-Type": "application/x-www-form-urlencoded",
-                "Referer": targetUrl // بعض المواقع تتطلب وجود هذا الهيدر للحماية
+                "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8",
+                "X-Requested-With": "XMLHttpRequest",
+                "Origin": "https://topcinma.com",
+                "Referer": targetUrl
             }
         });
 
@@ -273,8 +266,7 @@ app.get('/api/watch', async (req, res) => {
         
         const serverHtml = await serverResponse.text();
         
-        // serverHtml عبارة عن كود <iframe src="..."></iframe>
-        // نستخدم Cheerio مرة أخيرة لاستخراج الرابط النظيف
+        // 4. استخراج رابط iframe
         const $$ = cheerio.load(serverHtml);
         const iframeSrc = $$('iframe').attr('src') || "";
 
@@ -282,11 +274,14 @@ app.get('/api/watch', async (req, res) => {
         res.send(iframeSrc);
 
     } catch (error) {
-        console.error("Error in /api/watch:", error);
+        console.error("❌ خطأ:", error);
         res.setHeader('Content-Type', 'text/plain');
         res.send("");
     }
 });
+
+
+
 // ---------------------------------------------------------
 // تشغيل السيرفر
 // ---------------------------------------------------------
