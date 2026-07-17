@@ -214,86 +214,70 @@ app.get('/api/episodes', async (req, res) => {
 // ---------------------------------------------------------
 // المسار السريع لاستخراج السيرفر (النسخة النهائية المؤكدة)
 // ---------------------------------------------------------
+
 app.get('/api/watch', async (req, res) => {
     let targetUrl = req.query.url;
-
     if (!targetUrl) return res.send("");
     if (!targetUrl.endsWith('/watch/')) {
         targetUrl = targetUrl.replace(/\/$/, '') + '/watch/';
     }
 
     try {
-        console.log(`[1] جاري فحص الرابط: ${targetUrl}`);
-
-        // 1. جلب صفحة المشاهدة
-        const pageResponse = await fetch(encodeURI(targetUrl), { // تشفير الرابط هنا أيضاً للاحتياط
-            headers: { 
-                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)",
-                "Accept-Language": "en-US,en;q=0.9,ar;q=0.8"
-            }
+        const pageResponse = await fetch(encodeURI(targetUrl), {
+            headers: { "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)" }
         });
 
-        if (!pageResponse.ok) {
-            console.log("❌ فشل في جلب الصفحة الأساسية.");
-            return res.send("");
-        }
-        
         const pageHtml = await pageResponse.text();
         const $ = cheerio.load(pageHtml);
 
-        // 2. استخراج الـ ID بدقة
+        // 1. استخراج الـ ID
         const firstServerBtn = $('.server--item').first();
         const postId = firstServerBtn.attr('data-id') || "";
+        if (!postId) return res.send("");
 
-        if (!postId) {
-            console.log("❌ لم يتم العثور على data-id في الصفحة. تأكد من أن الرابط يحتوي على سيرفرات.");
-            return res.send("");
-        }
-
-        console.log(`[2] تم التقاط ID بنجاح: ${postId}`);
-
-        // 3. إرسال طلب POST
-        const serverUrl = "https://topcinma.com/wp-content/themes/movies2023/Ajaxat/Single/Server.php";
-        const payloadString = `id=${postId}&i=1`; 
-
-        const serverResponse = await fetch(serverUrl, {
-            method: 'POST',
-            body: payloadString,
-            headers: {
-                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)",
-                "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8",
-                "X-Requested-With": "XMLHttpRequest",
-                "Referer": encodeURI(targetUrl) // 🔥 الحل هنا: تشفير الحروف العربية في الرابط
-            }
+        // 2. استخراج جميع أرقام السيرفرات المتاحة
+        const serverIndexes = [];
+        $('.server--item').each((i, el) => {
+            serverIndexes.push($(el).attr('data-server'));
         });
 
-        if (!serverResponse.ok) {
-            console.log("❌ فشل الاتصال بملف Server.php");
-            return res.send("");
-        }
+        // 3. تجربة السيرفرات بالترتيب
+        const serverUrl = "https://topcinma.com/wp-content/themes/movies2023/Ajaxat/Single/Server.php";
         
-        const serverHtml = await serverResponse.text();
-        
-        // 4. استخراج رابط الـ iframe النظيف من الاستجابة
-        const $$ = cheerio.load(serverHtml);
-        const iframeSrc = $$('iframe').attr('src') || "";
+        for (let i of serverIndexes) {
+            const serverResponse = await fetch(serverUrl, {
+                method: 'POST',
+                body: `id=${postId}&i=${i}`,
+                headers: {
+                    "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8",
+                    "X-Requested-With": "XMLHttpRequest",
+                    "Referer": encodeURI(targetUrl)
+                }
+            });
 
-        if (iframeSrc) {
-            console.log(`[3] ✅ تم جلب الرابط النهائي: ${iframeSrc}`);
-            res.setHeader('Content-Type', 'text/plain');
-            res.send(iframeSrc);
-        } else {
-            console.log("❌ السيرفر رد بنجاح ولكن لم يحتوي على iframe. الرد كان:", serverHtml);
-            res.send("");
+            const serverHtml = await serverResponse.text();
+            const $$ = cheerio.load(serverHtml);
+            const iframeSrc = $$('iframe').attr('src') || "";
+
+            // 4. التحقق مما إذا كان الرابط صالحاً (ليس محظوراً أو إعلانياً)
+            const blockedDomains = ['llvpn', 'ads', 'pop', 'blank'];
+            const isBlocked = blockedDomains.some(d => iframeSrc.includes(d));
+
+            if (iframeSrc && iframeSrc.startsWith('http') && !isBlocked) {
+                console.log(`✅ تم العثور على سيرفر صالح (رقم ${i}): ${iframeSrc}`);
+                res.setHeader('Content-Type', 'text/plain');
+                return res.send(iframeSrc);
+            }
         }
+
+        console.log("❌ لم يتم العثور على أي سيرفر صالح.");
+        res.send("");
 
     } catch (error) {
-        console.error("❌ خطأ برمجي:", error.message); // قمت بتعديل هذه لتطبع الخطأ بشكل أرتب
-        res.setHeader('Content-Type', 'text/plain');
+        console.error("خطأ:", error.message);
         res.send("");
     }
 });
-
 
 
 
