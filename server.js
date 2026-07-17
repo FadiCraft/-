@@ -211,8 +211,6 @@ app.get('/api/episodes', async (req, res) => {
 
 
 
-
-
 // ---------------------------------------------------------
 // المسار السريع لاستخراج السيرفر (النسخة النهائية المؤكدة)
 // ---------------------------------------------------------
@@ -228,7 +226,7 @@ app.get('/api/watch', async (req, res) => {
         console.log(`[1] جاري فحص الرابط: ${targetUrl}`);
 
         // 1. جلب صفحة المشاهدة
-        const pageResponse = await fetch(targetUrl, {
+        const pageResponse = await fetch(encodeURI(targetUrl), { // تشفير الرابط هنا أيضاً للاحتياط
             headers: { 
                 "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)",
                 "Accept-Language": "en-US,en;q=0.9,ar;q=0.8"
@@ -243,7 +241,7 @@ app.get('/api/watch', async (req, res) => {
         const pageHtml = await pageResponse.text();
         const $ = cheerio.load(pageHtml);
 
-        // 2. استخراج الـ ID بدقة كما اكتشفت أنت
+        // 2. استخراج الـ ID بدقة
         const firstServerBtn = $('.server--item').first();
         const postId = firstServerBtn.attr('data-id') || "";
 
@@ -254,10 +252,8 @@ app.get('/api/watch', async (req, res) => {
 
         console.log(`[2] تم التقاط ID بنجاح: ${postId}`);
 
-        // 3. إرسال طلب POST بالضبط كما فعلنا في كونسول المتصفح
+        // 3. إرسال طلب POST
         const serverUrl = "https://topcinma.com/wp-content/themes/movies2023/Ajaxat/Single/Server.php";
-        
-        // استخدمنا صيغة النص المباشر لأنها نجحت معك في الصورة
         const payloadString = `id=${postId}&i=1`; 
 
         const serverResponse = await fetch(serverUrl, {
@@ -267,7 +263,7 @@ app.get('/api/watch', async (req, res) => {
                 "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)",
                 "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8",
                 "X-Requested-With": "XMLHttpRequest",
-                "Referer": targetUrl
+                "Referer": encodeURI(targetUrl) // 🔥 الحل هنا: تشفير الحروف العربية في الرابط
             }
         });
 
@@ -292,15 +288,11 @@ app.get('/api/watch', async (req, res) => {
         }
 
     } catch (error) {
-        console.error("❌ خطأ برمجي:", error);
+        console.error("❌ خطأ برمجي:", error.message); // قمت بتعديل هذه لتطبع الخطأ بشكل أرتب
         res.setHeader('Content-Type', 'text/plain');
         res.send("");
     }
 });
-
-
-
-
 
 
 
