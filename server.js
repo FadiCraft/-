@@ -235,10 +235,13 @@ app.get('/api/watch', async (req, res) => {
         const postId = firstServerBtn.attr('data-id') || "";
         if (!postId) return res.send("");
 
-        // 2. استخراج جميع أرقام السيرفرات المتاحة
+      // 2. استخراج جميع أرقام السيرفرات المتاحة
         const serverIndexes = [];
         $('.server--item').each((i, el) => {
-            serverIndexes.push($(el).attr('data-server'));
+            // إضافة شرط: لا تضف السيرفر إذا كان رقم الفهرس هو 0
+            if (i > 0) { 
+                serverIndexes.push($(el).attr('data-server'));
+            }
         });
 
         // 3. تجربة السيرفرات بالترتيب
