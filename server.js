@@ -21,7 +21,7 @@ const emptyResponse = {
 };
 
 // ---------------------------------------------------------
-// المسار الأول: استخراج الأفلام والمسلسلات (مع رقم الحلقة)
+// المسار الأول: استخراج الأفلام والمسلسلات
 // ---------------------------------------------------------
 app.get('/api/page', async (req, res) => {
     const targetUrl = req.query.url;
@@ -52,10 +52,10 @@ app.get('/api/page', async (req, res) => {
             const imgTag = box.find('div.Poster img');
             const imageUrl = imgTag.attr('data-src') || imgTag.attr('data-lazy-src') || imgTag.attr('src') || "";
 
-            // 📌 التعديل الجديد: استخراج رقم الحلقة للمسلسلات
-            const epNumText = box.find('div.number').text().trim();
-            // استخدام Regex لحذف أي نصوص مثل كلمة "حلقة" والإبقاء على الأرقام فقط
-            const eclip_Num = epNumText.replace(/\D/g, '') || "";
+            // 📌 التعديل الجديد: استخراج النص كاملاً من div.number
+            let eclip_Num = box.find('div.number').text().trim();
+            // لضمان وجود مسافة بين الكلمة والرقم إذا كانا متصلين (مثلاً "حلقة5" تصبح "حلقة 5")
+            eclip_Num = eclip_Num.replace(/([^\d\s])(\d)/g, '$1 $2').replace(/(\d)([^\d\s])/g, '$1 $2').trim();
 
             let genre = "";
             let quality = "";
@@ -84,7 +84,7 @@ app.get('/api/page', async (req, res) => {
                 genres: genre, 
                 quality, 
                 imdb: imdbRating,
-                eclip_Num: eclip_Num // سيتم وضع الرقم هنا إن وجد، وإلا سيكون فارغاً للأفلام
+                eclip_Num: eclip_Num // سيعرض الآن "حلقة 6" أو "1 موسم" أو سيكون فارغاً للأفلام
             });
         });
 
