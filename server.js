@@ -277,7 +277,7 @@ app.get('/api/watch', async (req, res) => {
 
                 // 4. التحقق مما إذا كان الرابط صالحاً 
                 // تمت إضافة 'updown' و 'updown.icu' لمنع هذا السيرفر نهائياً
-                const blockedDomains = ['llvpn', 'ads', 'pop', 'blank', 'updown.icu', 'updown'];
+                const blockedDomains = ['llvpn', 'ads', 'pop', 'blank','d0o0d','d0o0d.com', 'updown.icu', 'updown'];
                 const isBlocked = blockedDomains.some(d => iframeSrc.includes(d));
 
                 if (iframeSrc && iframeSrc.startsWith('http') && !isBlocked) {
