@@ -211,7 +211,7 @@ app.get('/api/episodes', async (req, res) => {
 
 
 // ---------------------------------------------------------
-// المسار السريع لاستخراج السيرفرات كلها بصيغة JSON (باستثناء الأول 0)
+// المسار السريع لاستخراج السيرفرات كلها بصيغة JSON (باستثناء الأول 0 و updown)
 // ---------------------------------------------------------
 
 app.get('/api/watch', async (req, res) => {
@@ -266,21 +266,20 @@ app.get('/api/watch', async (req, res) => {
                 const $$ = cheerio.load(serverHtml);
                 const iframeSrc = $$('iframe').attr('src') || "";
 
-                // 4. التحقق مما إذا كان الرابط صالحاً (ليس محظوراً أو إعلانياً)
-                const blockedDomains = ['llvpn', 'ads', 'pop', 'blank'];
+                // 4. التحقق مما إذا كان الرابط صالحاً 
+                // تمت إضافة 'updown' و 'updown.icu' لمنع هذا السيرفر نهائياً
+                const blockedDomains = ['llvpn', 'ads', 'pop', 'blank', 'updown.icu', 'updown'];
                 const isBlocked = blockedDomains.some(d => iframeSrc.includes(d));
 
                 if (iframeSrc && iframeSrc.startsWith('http') && !isBlocked) {
-                    console.log(`✅ تم العثور على سيرفر صالح (رقم ${i}): ${iframeSrc}`);
-                    // إضافة السيرفر للقائمة المعتمدة
+                    console.log(`✅ تم العثور على سيرفر صالح: ${iframeSrc}`);
+                    // إضافة السيرفر للقائمة بالصيغة المطلوبة
                     validServers.push({
-                        server_num: i,
                         url: iframeSrc
                     });
                 }
             } catch (err) {
                 console.error(`⚠️ خطأ أثناء فحص السيرفر رقم ${i}:`, err.message);
-                // يستمر اللوب لفحص السيرفر التالي ولا يتوقف
             }
         }
 
@@ -298,8 +297,6 @@ app.get('/api/watch', async (req, res) => {
         return res.json([]);
     }
 });
-
-
 
 // ---------------------------------------------------------
 // تشغيل السيرفر
