@@ -21,7 +21,7 @@ const emptyResponse = {
 };
 
 // ---------------------------------------------------------
-// المسار الأول: استخراج الأفلام
+// المسار الأول: استخراج الأفلام والمسلسلات (مع رقم الحلقة)
 // ---------------------------------------------------------
 app.get('/api/page', async (req, res) => {
     const targetUrl = req.query.url;
@@ -42,13 +42,20 @@ app.get('/api/page', async (req, res) => {
         $('div.Small--Box:not(.Season)').each((index, element) => {
             const box = $(element);
             
-            // 📌 التعديل هنا: البحث عن recent--block، وإذا لم يوجد نأخذ أول رابط <a> متاح
+            // استخراج الرابط (يدعم الأقسام العادية وقسم نتفليكس)
             const movieUrl = box.find('a.recent--block').attr('href') || box.find('a').first().attr('href') || "";
             
+            // استخراج العنوان
             const title = box.find('h3.title').text().trim() || "";
             
+            // استخراج الصورة
             const imgTag = box.find('div.Poster img');
             const imageUrl = imgTag.attr('data-src') || imgTag.attr('data-lazy-src') || imgTag.attr('src') || "";
+
+            // 📌 التعديل الجديد: استخراج رقم الحلقة للمسلسلات
+            const epNumText = box.find('div.number').text().trim();
+            // استخدام Regex لحذف أي نصوص مثل كلمة "حلقة" والإبقاء على الأرقام فقط
+            const eclip_Num = epNumText.replace(/\D/g, '') || "";
 
             let genre = "";
             let quality = "";
@@ -77,7 +84,7 @@ app.get('/api/page', async (req, res) => {
                 genres: genre, 
                 quality, 
                 imdb: imdbRating,
-                eclip_Num: "" // فارغ في حالة الأفلام
+                eclip_Num: eclip_Num // سيتم وضع الرقم هنا إن وجد، وإلا سيكون فارغاً للأفلام
             });
         });
 
@@ -89,7 +96,6 @@ app.get('/api/page', async (req, res) => {
         res.json([emptyResponse]);
     }
 });
-
 // ---------------------------------------------------------
 // المسار الثاني: استخراج المواسم
 // ---------------------------------------------------------
