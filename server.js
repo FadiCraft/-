@@ -41,7 +41,10 @@ app.get('/api/page', async (req, res) => {
 
         $('div.Small--Box:not(.Season)').each((index, element) => {
             const box = $(element);
-            const movieUrl = box.find('a.recent--block').attr('href') || "";
+            
+            // 📌 التعديل هنا: البحث عن recent--block، وإذا لم يوجد نأخذ أول رابط <a> متاح
+            const movieUrl = box.find('a.recent--block').attr('href') || box.find('a').first().attr('href') || "";
+            
             const title = box.find('h3.title').text().trim() || "";
             
             const imgTag = box.find('div.Poster img');
