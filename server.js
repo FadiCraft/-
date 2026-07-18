@@ -210,14 +210,15 @@ app.get('/api/episodes', async (req, res) => {
 
 
 
-
 // ---------------------------------------------------------
-// المسار السريع لاستخراج السيرفر (النسخة النهائية المؤكدة)
+// المسار السريع لاستخراج السيرفرات كلها بصيغة JSON (باستثناء الأول 0)
 // ---------------------------------------------------------
 
 app.get('/api/watch', async (req, res) => {
     let targetUrl = req.query.url;
-    if (!targetUrl) return res.send("");
+    
+    // إرجاع مصفوفة فارغة بصيغة JSON في حال عدم وجود رابط أو خطأ
+    if (!targetUrl) return res.json([]);
     if (!targetUrl.endsWith('/watch/')) {
         targetUrl = targetUrl.replace(/\/$/, '') + '/watch/';
     }
@@ -233,56 +234,70 @@ app.get('/api/watch', async (req, res) => {
         // 1. استخراج الـ ID
         const firstServerBtn = $('.server--item').first();
         const postId = firstServerBtn.attr('data-id') || "";
-        if (!postId) return res.send("");
+        if (!postId) return res.json([]);
 
-      // 2. استخراج جميع أرقام السيرفرات المتاحة
+        // 2. استخراج جميع أرقام السيرفرات المتاحة (مع استثناء الأول 0)
         const serverIndexes = [];
         $('.server--item').each((i, el) => {
-            // إضافة شرط: لا تضف السيرفر إذا كان رقم الفهرس هو 0
-            if (i > 0) { 
-                serverIndexes.push($(el).attr('data-server'));
+            const serverNum = $(el).attr('data-server');
+            // لا تضف السيرفر إذا كان ترتيبه الأول (i === 0) أو رقمه 0
+            if (i > 0 && serverNum !== "0") { 
+                serverIndexes.push(serverNum);
             }
         });
 
-        // 3. تجربة السيرفرات بالترتيب
+        // 3. تجربة السيرفرات بالترتيب وتخزين الشغال منها
         const serverUrl = "https://topcinma.com/wp-content/themes/movies2023/Ajaxat/Single/Server.php";
+        const validServers = []; // مصفوفة لتخزين السيرفرات الشغالة
         
         for (let i of serverIndexes) {
-            const serverResponse = await fetch(serverUrl, {
-                method: 'POST',
-                body: `id=${postId}&i=${i}`,
-                headers: {
-                    "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8",
-                    "X-Requested-With": "XMLHttpRequest",
-                    "Referer": encodeURI(targetUrl)
+            try {
+                const serverResponse = await fetch(serverUrl, {
+                    method: 'POST',
+                    body: `id=${postId}&i=${i}`,
+                    headers: {
+                        "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8",
+                        "X-Requested-With": "XMLHttpRequest",
+                        "Referer": encodeURI(targetUrl)
+                    }
+                });
+
+                const serverHtml = await serverResponse.text();
+                const $$ = cheerio.load(serverHtml);
+                const iframeSrc = $$('iframe').attr('src') || "";
+
+                // 4. التحقق مما إذا كان الرابط صالحاً (ليس محظوراً أو إعلانياً)
+                const blockedDomains = ['llvpn', 'ads', 'pop', 'blank'];
+                const isBlocked = blockedDomains.some(d => iframeSrc.includes(d));
+
+                if (iframeSrc && iframeSrc.startsWith('http') && !isBlocked) {
+                    console.log(`✅ تم العثور على سيرفر صالح (رقم ${i}): ${iframeSrc}`);
+                    // إضافة السيرفر للقائمة المعتمدة
+                    validServers.push({
+                        server_num: i,
+                        url: iframeSrc
+                    });
                 }
-            });
-
-            const serverHtml = await serverResponse.text();
-            const $$ = cheerio.load(serverHtml);
-            const iframeSrc = $$('iframe').attr('src') || "";
-
-            // 4. التحقق مما إذا كان الرابط صالحاً (ليس محظوراً أو إعلانياً)
-            const blockedDomains = ['llvpn', 'ads', 'pop', 'blank'];
-            const isBlocked = blockedDomains.some(d => iframeSrc.includes(d));
-
-            if (iframeSrc && iframeSrc.startsWith('http') && !isBlocked) {
-                console.log(`✅ تم العثور على سيرفر صالح (رقم ${i}): ${iframeSrc}`);
-                res.setHeader('Content-Type', 'text/plain');
-                return res.send(iframeSrc);
+            } catch (err) {
+                console.error(`⚠️ خطأ أثناء فحص السيرفر رقم ${i}:`, err.message);
+                // يستمر اللوب لفحص السيرفر التالي ولا يتوقف
             }
         }
 
-        console.log("❌ لم يتم العثور على أي سيرفر صالح.");
-        res.send("");
+        // 5. إرجاع النتائج بصيغة JSON
+        res.setHeader('Content-Type', 'application/json; charset=utf-8');
+        if (validServers.length > 0) {
+            return res.json(validServers);
+        } else {
+            console.log("❌ لم يتم العثور على أي سيرفر صالح.");
+            return res.json([]);
+        }
 
     } catch (error) {
-        console.error("خطأ:", error.message);
-        res.send("");
+        console.error("خطأ عام:", error.message);
+        return res.json([]);
     }
 });
-
-
 
 
 
