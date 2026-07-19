@@ -288,7 +288,7 @@ app.get('/api/episodes', async (req, res) => {
 });
 
 // ---------------------------------------------------------
-// المسار الرابع: استخراج السيرفرات
+// المسار الرابع: استخراج السيرفرات (تم التعديل ليصبح الرابط الأساسي أولاً)
 // ---------------------------------------------------------
 app.get('/api/watch', async (req, res) => {
     let targetUrl = req.query.url;
@@ -301,43 +301,44 @@ app.get('/api/watch', async (req, res) => {
 
         const html = await response.text();
         const $ = cheerio.load(html);
-        const validServers = [];
+        
+        // 1. نبدأ المصفوفة بالرابط الأساسي ليكون دائماً هو الأول
+        const validServers = [{ url: targetUrl }];
 
-        // استخراج الروابط المباشرة للسيرفرات
-        $('ul.WatchList li').each((index, element) => {
+        // 2. استخراج الروابط من القائمة
+        const listItems = $('ul.WatchList li');
+        const blockedDomains = ['llvpn', 'ads', 'pop', 'blank', 'd0o0d', 'updown.icu'];
+
+        listItems.each((index, element) => {
             const li = $(element);
             const iframeSrc = li.attr('data-embed-url') || "";
-
-            // فلترة السيرفرات الإعلانية والمزعجة
-            const blockedDomains = ['llvpn', 'ads', 'pop', 'blank', 'd0o0d', 'updown.icu'];
             const isBlocked = blockedDomains.some(d => iframeSrc.includes(d));
 
-            if (iframeSrc && iframeSrc.startsWith('http') && !isBlocked) {
+            // نتأكد من عدم إضافة الرابط الأساسي مرة أخرى إذا ظهر في القائمة
+            if (iframeSrc && iframeSrc.startsWith('http') && !isBlocked && iframeSrc !== targetUrl) {
                 validServers.push({
-                    url: iframeSrc // تم حذف الاسم كما طلبت ليكون الهيكل url فقط
+                    url: iframeSrc
                 });
             }
         });
 
-        res.setHeader('Content-Type', 'application/json; charset=utf-8');
-        
-        if (validServers.length > 0) {
-            return res.json(validServers);
-        } else {
-            // كود احتياطي في حال كان هناك iframe مباشر داخل الصفحة
+        // 3. الخطة الاحتياطية: إذا لم نجد سيرفرات في القائمة، نبحث عن iframe مباشر
+        if (validServers.length === 1) {
             const directIframe = $('iframe').first().attr('src');
-            if (directIframe && directIframe.startsWith('http')) {
-                 return res.json([{ url: directIframe }]);
+            if (directIframe && directIframe.startsWith('http') && directIframe !== targetUrl) {
+                validServers.push({ url: directIframe });
             }
-            return res.json([]);
         }
+
+        res.setHeader('Content-Type', 'application/json; charset=utf-8');
+        return res.json(validServers);
 
     } catch (error) {
         console.error("خطأ السيرفرات:", error.message);
-        return res.json([]);
+        // في حال حدوث خطأ، نرجع الرابط الأساسي فقط لضمان عمل التطبيق
+        return res.json([{ url: targetUrl }]);
     }
 });
-
 // ---------------------------------------------------------
 // تشغيل السيرفر
 // ---------------------------------------------------------
