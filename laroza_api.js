@@ -214,10 +214,13 @@ app.get('/api/episodes', async (req, res) => {
     if (!targetUrl) return res.json([emptyResponse]);
 
     try {
-        // استخراج رقم الموسم من الرابط (season_id)
-        const urlObj = new URL(targetUrl);
-        const seasonId = urlObj.searchParams.get('season_id');
-        const baseUrl = urlObj.origin;
+        // استخراج رقم الموسم سواء كان داخل الرابط المشفر أو تم فصله كمتغير مستقل بواسطة Express
+        let seasonId = req.query.season_id; // إذا كان مفصولاً
+        if (!seasonId) {
+            // إذا كان لا يزال داخل الرابط
+            const urlObj = new URL(targetUrl);
+            seasonId = urlObj.searchParams.get('season_id');
+        }
 
         const response = await fetch(targetUrl, {
             headers: { "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)" }
@@ -227,8 +230,8 @@ app.get('/api/episodes', async (req, res) => {
 
         const html = await response.text();
         const $ = cheerio.load(html);
+        const baseUrl = new URL(targetUrl).origin;
         
-        // جلب صورة المسلسل لتكون هي نفسها صورة الحلقات
         let imageUrl = $('link[rel="image_src"]').attr('href') || $('meta[property="og:image"]').attr('content') || "";
         if (imageUrl && !imageUrl.startsWith('http')) {
             imageUrl = new URL(imageUrl, baseUrl).href;
@@ -236,33 +239,29 @@ app.get('/api/episodes', async (req, res) => {
 
         const episodesList = [];
         
-        // تحديد الـ div المطلوب بناءً على رقم الموسم، وإذا لم يكن هناك رقم سيبحث عن أول قسم حلقات كإجراء احتياطي
+        // تحديد الـ div المطلوب بناءً على رقم الموسم
         let episodesContainer;
         if (seasonId) {
             episodesContainer = $(`div.SeasonsEpisodes[data-serie="${seasonId}"]`);
         } else {
+            // إذا لم يتم العثور على أي رقم موسم، اسحب الموسم الأول كاحتياطي
             episodesContainer = $('div.SeasonsEpisodes').first();
         }
 
-        // استخراج الحلقات من داخل الـ div المحدد فقط
         episodesContainer.find('a').each((i, el) => {
             const aTag = $(el);
             let rawUrl = aTag.attr('href') || "";
             
-            if (!rawUrl) return true; // تخطي إذا لم يوجد رابط
+            if (!rawUrl) return true;
 
-            // تحويل الرابط إلى play.php ليعمل داخل التطبيق
             let episodeUrl = rawUrl.startsWith('http') ? rawUrl : new URL(rawUrl, baseUrl).href;
             episodeUrl = episodeUrl.replace('/video.php?vid=', '/play.php?vid=');
 
-            // استخراج العنوان
             const title = aTag.attr('title') || aTag.text().trim() || "";
             
-            // استخراج رقم الحلقة من وسم <em>
             const epNumText = aTag.find('em').text().trim();
             const eclip_Num = epNumText ? `الحلقة ${epNumText}` : "";
 
-            // توليد آيدي فريد للحلقة
             const id = crypto.createHash('md5').update(episodeUrl).digest('hex');
 
             episodesList.push({
