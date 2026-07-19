@@ -40,133 +40,91 @@ function cleanImageUrl(imgTag, baseUrl) {
 
 
 // ---------------------------------------------------------
-// المسار الأول: استخراج الأفلام والمسلسلات (باستخدام Puppeteer)
+// المسار الأول: استخراج الأفلام والمسلسلات (باستخدام Cheerio فقط وبدون أخطاء)
 // ---------------------------------------------------------
 app.get('/api/page', async (req, res) => {
     const targetUrl = req.query.url;
 
     if (!targetUrl) return res.json([emptyResponse]);
 
-    let browser;
     try {
-        // تشغيل المتصفح المخفي
-        browser = await puppeteer.launch({
-            headless: true,
-            args: ['--no-sandbox', '--disable-setuid-sandbox']
-        });
-        
-        const page = await browser.newPage();
-        
-        // تعيين User-Agent ليبدو كمتصفح حقيقي
-        await page.setUserAgent("Mozilla/5.0 (Windows NT 10.0; Win64; x64)");
-        
-        // الانتقال للصفحة المطلوبة
-        await page.goto(targetUrl, { waitUntil: 'domcontentloaded', timeout: 30000 });
-
-        // سكريبت يتم تنفيذه داخل المتصفح للنزول لأسفل الصفحة تدريجياً وتحفيز ظهور الصور
-        await page.evaluate(async () => {
-            await new Promise((resolve) => {
-                let totalHeight = 0;
-                const distance = 100; // مسافة النزول في كل مرة
-                const timer = setInterval(() => {
-                    const scrollHeight = document.body.scrollHeight;
-                    window.scrollBy(0, distance);
-                    totalHeight += distance;
-
-                    // التوقف عند الوصول لنهاية الصفحة أو بعد مسافة معينة
-                    if (totalHeight >= scrollHeight - window.innerHeight || totalHeight > 4000) {
-                        clearInterval(timer);
-                        resolve();
-                    }
-                }, 100); // سرعة النزول
-            });
+        const response = await fetch(targetUrl, {
+            headers: { 
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.0.0 Safari/537.36",
+                "Accept-Language": "ar,en-US;q=0.9,en;q=0.8"
+            }
         });
 
-        // انتظار ثانية إضافية للتأكد من أن الصور أخذت وقتها في التحميل
-        await new Promise(r => setTimeout(r, 1000));
+        if (!response.ok) return res.json([emptyResponse]);
 
-        // استخراج البيانات بعد ظهور الصور الحقيقية
+        const html = await response.text();
+        const $ = cheerio.load(html);
+        const moviesList = [];
         const baseUrl = new URL(targetUrl).origin;
-        const extractedData = await page.evaluate((baseUrl) => {
-            const results = [];
-            // تحديد العناصر
-            const items = document.querySelectorAll('li.col-xs-6.col-sm-4.col-md-3');
 
-            items.forEach(box => {
-                const aTag = box.querySelector('a');
-                let rawUrl = aTag ? aTag.getAttribute('href') : "";
-                
-                // تعديل الرابط ليكون play.php بدلاً من video.php
-                let movieUrl = rawUrl;
-                if (rawUrl) {
-                    movieUrl = rawUrl.startsWith('http') ? rawUrl : new URL(rawUrl, baseUrl).href;
-                    movieUrl = movieUrl.replace('/video.php?vid=', '/play.php?vid=');
+        $('li.col-xs-6.col-sm-4.col-md-3').each((index, element) => {
+            const box = $(element);
+            
+            // استخراج الرابط وتعديله إلى play.php
+            const rawUrl = box.find('a').first().attr('href') || "";
+            let movieUrl = rawUrl;
+            if (rawUrl) {
+                movieUrl = rawUrl.startsWith('http') ? rawUrl : new URL(rawUrl, baseUrl).href;
+                movieUrl = movieUrl.replace('/video.php?vid=', '/play.php?vid=');
+            }
+            
+            // استخراج العنوان
+            const title = box.find('.caption h3 a').text().trim() || box.find('a').first().attr('title') || "";
+            
+            // استخراج الصورة الذكي (البحث في كل السمات وتجاهل base64)
+            const imgTag = box.find('img.img-responsive');
+            let imageUrl = "";
+            const possibleAttrs = ['data-src', 'data-lazy-src', 'data-original', 'src']; // الأماكن المحتملة للصورة
+            
+            for (let attr of possibleAttrs) {
+                const val = imgTag.attr(attr);
+                // إذا لقى رابط وما كان بيبدأ برموز الـ base64 بيعتمده وبوقف بحث
+                if (val && !val.startsWith('data:image')) {
+                    imageUrl = val;
+                    break;
                 }
-                
-                // العنوان
-                const titleTag = box.querySelector('.caption h3 a');
-                const title = titleTag ? titleTag.innerText.trim() : (aTag ? aTag.getAttribute('title') : "");
+            }
 
-                // الصورة (الآن بعد النزول للأسفل، سمة src ستحتوي على الرابط الحقيقي)
-                const imgTag = box.querySelector('img.img-responsive');
-                let imageUrl = "";
-                if (imgTag) {
-                    imageUrl = imgTag.getAttribute('src') || imgTag.getAttribute('data-src') || "";
-                    // إذا كان لا يزال يحمل base64 نتجاهله
-                    if (imageUrl.startsWith('data:image')) {
-                        imageUrl = imgTag.getAttribute('data-src') || "";
-                    }
-                    if (imageUrl && !imageUrl.startsWith('http')) {
-                        imageUrl = new URL(imageUrl, baseUrl).href;
-                    }
-                }
+            // التأكد من أن رابط الصورة كامل
+            if (imageUrl && !imageUrl.startsWith('http')) {
+                imageUrl = new URL(imageUrl, baseUrl).href;
+            }
 
-                // الجودة
-                const qualityTag = box.querySelector('.pm-video-labels .hot');
-                const quality = qualityTag ? qualityTag.innerText.trim() : "";
+            // استخراج الجودة
+            const quality = box.find('.pm-video-labels .hot').text().trim() || "";
 
-                // المدة أو رقم الحلقة
-                const durationTag = box.querySelector('.pm-label-duration');
-                const eclip_Num = durationTag ? durationTag.innerText.trim() : "";
+            // استخراج المدة أو رقم الحلقة
+            const eclip_Num = box.find('.pm-label-duration').text().trim() || "";
 
-                results.push({
-                    title: title,
-                    url: movieUrl,
-                    image: imageUrl,
-                    genres: "",
-                    quality: quality,
+            const id = movieUrl ? crypto.createHash('md5').update(movieUrl).digest('hex') : "";
+
+            // تجنب إضافة عناصر فارغة إذا لم يتم العثور على عنوان ورابط
+            if (title && movieUrl) {
+                moviesList.push({
+                    id, 
+                    title, 
+                    url: movieUrl, 
+                    image: imageUrl, 
+                    genres: "", 
+                    quality, 
                     imdb: "",
-                    eclip_Num: eclip_Num
+                    eclip_Num 
                 });
-            });
-            return results;
-        }, baseUrl);
-
-        await browser.close();
-
-        // إنشاء التشفير (ID) في بيئة السيرفر (Node.js) لأن مكتبة crypto لا تعمل داخل المتصفح
-        const finalMoviesList = extractedData.map(movie => {
-            const id = movie.url ? crypto.createHash('md5').update(movie.url).digest('hex') : "";
-            return {
-                id: id,
-                title: movie.title,
-                url: movie.url,
-                image: movie.image,
-                genres: movie.genres,
-                quality: movie.quality,
-                imdb: movie.imdb,
-                eclip_Num: movie.eclip_Num
-            };
+            }
         });
 
-        if (finalMoviesList.length === 0) return res.json([emptyResponse]);
+        if (moviesList.length === 0) return res.json([emptyResponse]);
 
         res.setHeader('Content-Type', 'application/json; charset=utf-8');
-        res.json(finalMoviesList);
+        res.json(moviesList);
 
     } catch (error) {
         console.error("خطأ في المسار الأول:", error.message);
-        if (browser) await browser.close();
         res.json([emptyResponse]);
     }
 });
