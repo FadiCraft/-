@@ -19,13 +19,23 @@ const emptyResponse = {
     eclip_Num: ""
 };
 
-// دالة مساعدة لتنظيف وتعديل الروابط (تغيير video إلى play)
+// دالة مساعدة لتعديل الروابط (تغيير video إلى play وتحويل الروابط النسبية لكاملة)
 function formatUrl(url, baseUrl) {
     if (!url) return "";
-    // تحويل الرابط النسبي إلى رابط كامل إذا لزم الأمر
     let fullUrl = url.startsWith('http') ? url : new URL(url, baseUrl).href;
-    // استبدال video.php بـ play.php كما طلبت
     return fullUrl.replace('/video.php?vid=', '/play.php?vid=');
+}
+
+// دالة لتنظيف رابط الصورة وتجنب روابط base64
+function cleanImageUrl(imgTag, baseUrl) {
+    let url = imgTag.attr('data-src') || imgTag.attr('data-lazy-src') || imgTag.attr('src') || "";
+    if (url.startsWith('data:image')) {
+        url = ""; // تجاهل الصور الوهمية
+    }
+    if (url && !url.startsWith('http')) {
+        url = new URL(url, baseUrl).href;
+    }
+    return url;
 }
 
 // ---------------------------------------------------------
@@ -50,24 +60,17 @@ app.get('/api/page', async (req, res) => {
         $('li.col-xs-6.col-sm-4.col-md-3').each((index, element) => {
             const box = $(element);
             
-            // استخراج الرابط وتعديله
-            let rawUrl = box.find('a').first().attr('href') || "";
-            // إذا كان في الرئيسية غالبا الرابط لمسلسل كامل يكون للموسم الأول، سنتركه كما هو أو نعدله
-            let movieUrl = formatUrl(rawUrl, baseUrl);
+            const rawUrl = box.find('a').first().attr('href') || "";
+            const movieUrl = formatUrl(rawUrl, baseUrl);
             
-            // استخراج العنوان
             const title = box.find('.caption h3 a').text().trim() || box.find('a').first().attr('title') || "";
             
-            // استخراج الصورة
+            // استخراج الصورة مع تجنب الـ base64
             const imgTag = box.find('img.img-responsive');
-            const imageUrl = imgTag.attr('data-src') || imgTag.attr('src') || "";
+            const imageUrl = cleanImageUrl(imgTag, baseUrl);
 
-            // الجودة
             const quality = box.find('.pm-video-labels .hot').text().trim() || "";
-
-            // استخراج المدة أو رقم الحلقة (إن وجد)
-            const durationOrEp = box.find('.pm-label-duration').text().trim() || "";
-            const eclip_Num = durationOrEp; // يمكنك فلترتها لاحقاً إذا أردت
+            const eclip_Num = box.find('.pm-label-duration').text().trim() || "";
 
             const id = movieUrl ? crypto.createHash('md5').update(movieUrl).digest('hex') : "";
 
@@ -88,7 +91,6 @@ app.get('/api/page', async (req, res) => {
         res.setHeader('Content-Type', 'application/json; charset=utf-8');
         res.json(moviesList);
     } catch (error) {
-        console.error(error);
         res.json([emptyResponse]);
     }
 });
@@ -111,14 +113,15 @@ app.get('/api/seasons', async (req, res) => {
         const $ = cheerio.load(html);
         const seasonsList = [];
 
-        // استخراج المواسم
+        // استخراج صورة الموسم من الميتا تاج كما طلبت
+        const metaImage = $('meta[property="og:image"]').attr('content') || "";
+
         $('div.SeasonsBoxUL ul li').each((index, element) => {
             const li = $(element);
             const seasonNumber = li.attr('data-serie') || "";
             const title = li.text().trim() || `الموسم ${seasonNumber}`;
             
-            // الخدعة هنا: نمرر نفس رابط الصفحة ولكن نضيف له رقم الموسم
-            // لكي يستطيع مسار الحلقات لاحقاً قراءته واستخراج القسم الخاص به
+            // تجهيز رابط الموسم لكي يقرأه مسار الحلقات لاحقاً
             const seasonUrl = `${targetUrl}&season_id=${seasonNumber}`;
             const id = seasonUrl ? crypto.createHash('md5').update(seasonUrl).digest('hex') : "";
 
@@ -126,7 +129,7 @@ app.get('/api/seasons', async (req, res) => {
                 id: id,
                 title: title,
                 url: seasonUrl,
-                image: "", // لا يوجد صور للمواسم في الهيكل الجديد
+                image: metaImage, // إضافة الصورة الموحدة للمواسم
                 genres: "",
                 quality: "",
                 imdb: "",
@@ -151,12 +154,12 @@ app.get('/api/episodes', async (req, res) => {
     let targetUrl = req.query.url;
     if (!targetUrl) return res.json([emptyResponse]);
 
-    // استخراج رقم الموسم الذي مررناه في مسار المواسم
-    let seasonId = "1"; // الافتراضي
+    // فصل الرابط الأصلي عن رقم الموسم
+    let seasonId = "1";
     if (targetUrl.includes('&season_id=')) {
-        const urlParts = targetUrl.split('&season_id=');
-        targetUrl = urlParts[0]; // الرابط الأصلي للصفحة
-        seasonId = urlParts[1]; // رقم الموسم
+        const parts = targetUrl.split('&season_id=');
+        targetUrl = parts[0];
+        seasonId = parts[1];
     }
 
     try {
@@ -171,7 +174,10 @@ app.get('/api/episodes', async (req, res) => {
         const episodesList = [];
         const baseUrl = new URL(targetUrl).origin;
 
-        // استهداف الحلقات التابعة للموسم المحدد فقط
+        // استخراج صورة الغلاف لتكون صورة للحلقة (في حال عدم وجود صور للحلقات)
+        const metaImage = $('meta[property="og:image"]').attr('content') || "";
+
+        // التركيز فقط على الـ div الخاص برقم الموسم المستهدف (سواء كان مخفي أو ظاهر)
         $(`div.SeasonsEpisodes[data-serie="${seasonId}"] a`).each((index, element) => {
             const aTag = $(element);
             
@@ -179,7 +185,7 @@ app.get('/api/episodes', async (req, res) => {
             const url = formatUrl(rawUrl, baseUrl); // تعديل الرابط ليكون play.php
             
             const title = aTag.attr('title') || "";
-            const epNum = aTag.find('em').text().trim() || ""; // رقم الحلقة
+            const epNum = aTag.find('em').text().trim() || "";
 
             const id = url ? crypto.createHash('md5').update(url).digest('hex') : "";
 
@@ -187,7 +193,7 @@ app.get('/api/episodes', async (req, res) => {
                 id: id,
                 title: title,
                 url: url,
-                image: "", // لا يوجد صور للحلقات في الهيكل الجديد
+                image: metaImage, // تعيين الصورة
                 genres: "", 
                 quality: "", 
                 imdb: "",
@@ -206,7 +212,7 @@ app.get('/api/episodes', async (req, res) => {
 });
 
 // ---------------------------------------------------------
-// المسار الرابع: استخراج السيرفرات (تم تبسيطه جداً بناء على الهيكل الجديد)
+// المسار الرابع: استخراج السيرفرات
 // ---------------------------------------------------------
 app.get('/api/watch', async (req, res) => {
     let targetUrl = req.query.url;
@@ -221,37 +227,37 @@ app.get('/api/watch', async (req, res) => {
         const $ = cheerio.load(html);
         const validServers = [];
 
-        // السيرفرات في الموقع الجديد موجودة مباشرة داخل data-embed-url
+        // استخراج الروابط المباشرة للسيرفرات
         $('ul.WatchList li').each((index, element) => {
             const li = $(element);
             const iframeSrc = li.attr('data-embed-url') || "";
-            const serverName = li.find('strong').text().trim() || `سيرفر ${index + 1}`;
 
+            // فلترة السيرفرات الإعلانية والمزعجة
             const blockedDomains = ['llvpn', 'ads', 'pop', 'blank', 'd0o0d', 'updown.icu'];
             const isBlocked = blockedDomains.some(d => iframeSrc.includes(d));
 
             if (iframeSrc && iframeSrc.startsWith('http') && !isBlocked) {
                 validServers.push({
-                    name: serverName, // أضفت اسم السيرفر ليكون أفضل لك في العرض
-                    url: iframeSrc
+                    url: iframeSrc // تم حذف الاسم كما طلبت ليكون الهيكل url فقط
                 });
             }
         });
 
         res.setHeader('Content-Type', 'application/json; charset=utf-8');
+        
         if (validServers.length > 0) {
             return res.json(validServers);
         } else {
-            // كود بديل إذا كان هناك iframe مباشر في الصفحة (احتياطي)
+            // كود احتياطي في حال كان هناك iframe مباشر داخل الصفحة
             const directIframe = $('iframe').first().attr('src');
             if (directIframe && directIframe.startsWith('http')) {
-                 return res.json([{ name: "سيرفر رئيسي", url: directIframe }]);
+                 return res.json([{ url: directIframe }]);
             }
             return res.json([]);
         }
 
     } catch (error) {
-        console.error("خطأ استخراج السيرفرات:", error.message);
+        console.error("خطأ السيرفرات:", error.message);
         return res.json([]);
     }
 });
