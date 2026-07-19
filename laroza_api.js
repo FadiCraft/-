@@ -209,18 +209,16 @@ app.get('/api/seasons', async (req, res) => {
 // المسار الثالث: استخراج الحلقات
 // ---------------------------------------------------------
 app.get('/api/episodes', async (req, res) => {
-    let targetUrl = req.query.url;
+    const targetUrl = req.query.url;
+
     if (!targetUrl) return res.json([emptyResponse]);
 
-    // فصل الرابط الأصلي عن رقم الموسم
-    let seasonId = "1";
-    if (targetUrl.includes('&season_id=')) {
-        const parts = targetUrl.split('&season_id=');
-        targetUrl = parts[0];
-        seasonId = parts[1];
-    }
-
     try {
+        // استخراج رقم الموسم من الرابط (season_id)
+        const urlObj = new URL(targetUrl);
+        const seasonId = urlObj.searchParams.get('season_id');
+        const baseUrl = urlObj.origin;
+
         const response = await fetch(targetUrl, {
             headers: { "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)" }
         });
@@ -229,33 +227,53 @@ app.get('/api/episodes', async (req, res) => {
 
         const html = await response.text();
         const $ = cheerio.load(html);
+        
+        // جلب صورة المسلسل لتكون هي نفسها صورة الحلقات
+        let imageUrl = $('link[rel="image_src"]').attr('href') || $('meta[property="og:image"]').attr('content') || "";
+        if (imageUrl && !imageUrl.startsWith('http')) {
+            imageUrl = new URL(imageUrl, baseUrl).href;
+        }
+
         const episodesList = [];
-        const baseUrl = new URL(targetUrl).origin;
+        
+        // تحديد الـ div المطلوب بناءً على رقم الموسم، وإذا لم يكن هناك رقم سيبحث عن أول قسم حلقات كإجراء احتياطي
+        let episodesContainer;
+        if (seasonId) {
+            episodesContainer = $(`div.SeasonsEpisodes[data-serie="${seasonId}"]`);
+        } else {
+            episodesContainer = $('div.SeasonsEpisodes').first();
+        }
 
-        // استخراج صورة الغلاف لتكون صورة للحلقة (في حال عدم وجود صور للحلقات)
-        const metaImage = $('meta[property="og:image"]').attr('content') || "";
-
-        // التركيز فقط على الـ div الخاص برقم الموسم المستهدف (سواء كان مخفي أو ظاهر)
-        $(`div.SeasonsEpisodes[data-serie="${seasonId}"] a`).each((index, element) => {
-            const aTag = $(element);
+        // استخراج الحلقات من داخل الـ div المحدد فقط
+        episodesContainer.find('a').each((i, el) => {
+            const aTag = $(el);
+            let rawUrl = aTag.attr('href') || "";
             
-            const rawUrl = aTag.attr('href') || "";
-            const url = formatUrl(rawUrl, baseUrl); // تعديل الرابط ليكون play.php
-            
-            const title = aTag.attr('title') || "";
-            const epNum = aTag.find('em').text().trim() || "";
+            if (!rawUrl) return true; // تخطي إذا لم يوجد رابط
 
-            const id = url ? crypto.createHash('md5').update(url).digest('hex') : "";
+            // تحويل الرابط إلى play.php ليعمل داخل التطبيق
+            let episodeUrl = rawUrl.startsWith('http') ? rawUrl : new URL(rawUrl, baseUrl).href;
+            episodeUrl = episodeUrl.replace('/video.php?vid=', '/play.php?vid=');
+
+            // استخراج العنوان
+            const title = aTag.attr('title') || aTag.text().trim() || "";
+            
+            // استخراج رقم الحلقة من وسم <em>
+            const epNumText = aTag.find('em').text().trim();
+            const eclip_Num = epNumText ? `الحلقة ${epNumText}` : "";
+
+            // توليد آيدي فريد للحلقة
+            const id = crypto.createHash('md5').update(episodeUrl).digest('hex');
 
             episodesList.push({
-                id: id,
-                title: title,
-                url: url,
-                image: metaImage, // تعيين الصورة
-                genres: "", 
-                quality: "", 
+                id,
+                title,
+                url: episodeUrl,
+                image: imageUrl,
+                genres: "",
+                quality: "",
                 imdb: "",
-                eclip_Num: epNum 
+                eclip_Num
             });
         });
 
@@ -265,6 +283,7 @@ app.get('/api/episodes', async (req, res) => {
         res.json(episodesList);
 
     } catch (error) {
+        console.error("خطأ في استخراج الحلقات:", error.message);
         res.json([emptyResponse]);
     }
 });
