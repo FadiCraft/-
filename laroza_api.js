@@ -39,8 +39,9 @@ function cleanImageUrl(imgTag, baseUrl) {
 }
 
 
+
 // ---------------------------------------------------------
-// المسار الأول: استخراج الأفلام والمسلسلات
+// المسار الأول: استخراج الأفلام والمسلسلات (بالدخول لصفحة الفيلم لجلب الصورة)
 // ---------------------------------------------------------
 app.get('/api/page', async (req, res) => {
     const targetUrl = req.query.url;
@@ -50,8 +51,7 @@ app.get('/api/page', async (req, res) => {
     try {
         const response = await fetch(targetUrl, {
             headers: { 
-                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.0.0 Safari/537.36",
-                "Accept-Language": "ar,en-US;q=0.9,en;q=0.8"
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"
             }
         });
 
@@ -59,75 +59,99 @@ app.get('/api/page', async (req, res) => {
 
         const html = await response.text();
         const $ = cheerio.load(html);
-        const moviesList = [];
         const baseUrl = new URL(targetUrl).origin;
+        
+        // مصفوفة مؤقتة لتخزين البيانات الأساسية قبل جلب الصور
+        const tempItems = [];
 
+        // استخراج البيانات من الصفحة الرئيسية بحد أقصى 30 عنصر
         $('li.col-xs-6.col-sm-4.col-md-3').each((index, element) => {
+            if (index >= 30) return false; // التوقف عند 30 عنصر
+
             const box = $(element);
             
-            // استخراج الرابط وتعديله إلى play.php
+            // الرابط الأصلي الذي سندخل عليه لجلب الصورة
             const rawUrl = box.find('a').first().attr('href') || "";
-            let movieUrl = rawUrl;
-            if (rawUrl) {
-                movieUrl = rawUrl.startsWith('http') ? rawUrl : new URL(rawUrl, baseUrl).href;
-                movieUrl = movieUrl.replace('/video.php?vid=', '/play.php?vid=');
-            }
+            if (!rawUrl) return true; // تخطي إذا لم يكن هناك رابط
+
+            const fetchUrl = rawUrl.startsWith('http') ? rawUrl : new URL(rawUrl, baseUrl).href;
             
-            // استخراج العنوان
+            // الرابط النهائي الذي سيتم عرضه في التطبيق (معدل لـ play.php)
+            const movieUrl = formatUrl(rawUrl, baseUrl);
+            
             const title = box.find('.caption h3 a').text().trim() || box.find('a').first().attr('title') || "";
-            
-            // استخراج الصورة الذكي (البحث في كل السمات وتجاهل base64)
-            const imgTag = box.find('img.img-responsive');
-            let imageUrl = "";
-            const possibleAttrs = ['data-src', 'data-lazy-src', 'data-original', 'src']; // الأماكن المحتملة للصورة
-            
-            for (let attr of possibleAttrs) {
-                const val = imgTag.attr(attr);
-                // إذا لقى رابط وما كان بيبدأ برموز الـ base64 بيعتمده وبوقف بحث
-                if (val && !val.startsWith('data:image')) {
-                    imageUrl = val;
-                    break;
-                }
-            }
-
-            // التأكد من أن رابط الصورة كامل
-            if (imageUrl && !imageUrl.startsWith('http')) {
-                imageUrl = new URL(imageUrl, baseUrl).href;
-            }
-
-            // استخراج الجودة
             const quality = box.find('.pm-video-labels .hot').text().trim() || "";
-
-            // استخراج المدة أو رقم الحلقة
             const eclip_Num = box.find('.pm-label-duration').text().trim() || "";
-
             const id = movieUrl ? crypto.createHash('md5').update(movieUrl).digest('hex') : "";
 
-            // تجنب إضافة عناصر فارغة إذا لم يتم العثور على عنوان ورابط
-            if (title && movieUrl) {
-                moviesList.push({
-                    id, 
-                    title, 
-                    url: movieUrl, 
-                    image: imageUrl, 
-                    genres: "", 
-                    quality, 
-                    imdb: "",
-                    eclip_Num 
-                });
-            }
+            tempItems.push({
+                id, 
+                title, 
+                url: movieUrl, // الرابط النهائي للتطبيق
+                fetchUrl,      // الرابط المؤقت لاستخراج الصورة
+                quality, 
+                eclip_Num,
+                genres: "",
+                imdb: ""
+            });
         });
 
-        if (moviesList.length === 0) return res.json([emptyResponse]);
+        // الدخول لصفحات الأفلام كلها في نفس الوقت لجلب الصورة (سريع جداً)
+        const finalMoviesList = await Promise.all(tempItems.map(async (item) => {
+            try {
+                const pageResponse = await fetch(item.fetchUrl, {
+                    headers: { "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)" }
+                });
+                
+                const pageHtml = await pageResponse.text();
+                const $$ = cheerio.load(pageHtml);
+                
+                // استخراج الصورة من <link rel="image_src"> كما طلبت
+                let imageUrl = $$('link[rel="image_src"]').attr('href') || 
+                               $$('meta[property="og:image"]').attr('content') || "";
+                
+                // التأكد من أن الرابط كامل
+                if (imageUrl && !imageUrl.startsWith('http')) {
+                    imageUrl = new URL(imageUrl, baseUrl).href;
+                }
+
+                // إرجاع العنصر بعد إضافة الصورة وإزالة رابط الـ fetchUrl المؤقت
+                return {
+                    id: item.id,
+                    title: item.title,
+                    url: item.url,
+                    image: imageUrl,
+                    genres: item.genres,
+                    quality: item.quality,
+                    imdb: item.imdb,
+                    eclip_Num: item.eclip_Num
+                };
+            } catch (err) {
+                // في حال فشل جلب صورة فيلم معين، نرجع العنصر بدون صورة بدلاً من إيقاف الكود كاملاً
+                return {
+                    id: item.id,
+                    title: item.title,
+                    url: item.url,
+                    image: "",
+                    genres: item.genres,
+                    quality: item.quality,
+                    imdb: item.imdb,
+                    eclip_Num: item.eclip_Num
+                };
+            }
+        }));
+
+        if (finalMoviesList.length === 0) return res.json([emptyResponse]);
 
         res.setHeader('Content-Type', 'application/json; charset=utf-8');
-        res.json(moviesList);
+        res.json(finalMoviesList);
 
     } catch (error) {
         console.error("خطأ في المسار الأول:", error.message);
         res.json([emptyResponse]);
     }
 });
+
 
 // ---------------------------------------------------------
 // المسار الثاني: استخراج المواسم
