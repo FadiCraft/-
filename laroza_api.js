@@ -44,11 +44,15 @@ function cleanImageUrl(imgTag, baseUrl) {
 // ---------------------------------------------------------
 app.get('/api/page', async (req, res) => {
     const targetUrl = req.query.url;
+
     if (!targetUrl) return res.json([emptyResponse]);
 
     try {
         const response = await fetch(targetUrl, {
-            headers: { "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)" }
+            headers: { 
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.0.0 Safari/537.36",
+                "Accept-Language": "ar,en-US;q=0.9,en;q=0.8"
+            }
         });
 
         if (!response.ok) return res.json([emptyResponse]);
@@ -61,45 +65,66 @@ app.get('/api/page', async (req, res) => {
         $('li.col-xs-6.col-sm-4.col-md-3').each((index, element) => {
             const box = $(element);
             
-            // استخراج الرابط وتعديله
-            let rawUrl = box.find('a').first().attr('href') || "";
-            // إذا كان في الرئيسية غالبا الرابط لمسلسل كامل يكون للموسم الأول، سنتركه كما هو أو نعدله
-            let movieUrl = formatUrl(rawUrl, baseUrl);
+            // استخراج الرابط وتعديله إلى play.php
+            const rawUrl = box.find('a').first().attr('href') || "";
+            let movieUrl = rawUrl;
+            if (rawUrl) {
+                movieUrl = rawUrl.startsWith('http') ? rawUrl : new URL(rawUrl, baseUrl).href;
+                movieUrl = movieUrl.replace('/video.php?vid=', '/play.php?vid=');
+            }
             
             // استخراج العنوان
             const title = box.find('.caption h3 a').text().trim() || box.find('a').first().attr('title') || "";
             
-            // استخراج الصورة
+            // استخراج الصورة الذكي (البحث في كل السمات وتجاهل base64)
             const imgTag = box.find('img.img-responsive');
-            const imageUrl = imgTag.attr('data-src') || imgTag.attr('src') || "";
+            let imageUrl = "";
+            const possibleAttrs = ['data-src', 'data-lazy-src', 'data-original', 'src']; // الأماكن المحتملة للصورة
+            
+            for (let attr of possibleAttrs) {
+                const val = imgTag.attr(attr);
+                // إذا لقى رابط وما كان بيبدأ برموز الـ base64 بيعتمده وبوقف بحث
+                if (val && !val.startsWith('data:image')) {
+                    imageUrl = val;
+                    break;
+                }
+            }
 
-            // الجودة
+            // التأكد من أن رابط الصورة كامل
+            if (imageUrl && !imageUrl.startsWith('http')) {
+                imageUrl = new URL(imageUrl, baseUrl).href;
+            }
+
+            // استخراج الجودة
             const quality = box.find('.pm-video-labels .hot').text().trim() || "";
 
-            // استخراج المدة أو رقم الحلقة (إن وجد)
-            const durationOrEp = box.find('.pm-label-duration').text().trim() || "";
-            const eclip_Num = durationOrEp; // يمكنك فلترتها لاحقاً إذا أردت
+            // استخراج المدة أو رقم الحلقة
+            const eclip_Num = box.find('.pm-label-duration').text().trim() || "";
 
             const id = movieUrl ? crypto.createHash('md5').update(movieUrl).digest('hex') : "";
 
-            moviesList.push({
-                id, 
-                title, 
-                url: movieUrl, 
-                image: imageUrl, 
-                genres: "", 
-                quality, 
-                imdb: "",
-                eclip_Num 
-            });
+            // تجنب إضافة عناصر فارغة إذا لم يتم العثور على عنوان ورابط
+            if (title && movieUrl) {
+                moviesList.push({
+                    id, 
+                    title, 
+                    url: movieUrl, 
+                    image: imageUrl, 
+                    genres: "", 
+                    quality, 
+                    imdb: "",
+                    eclip_Num 
+                });
+            }
         });
 
         if (moviesList.length === 0) return res.json([emptyResponse]);
 
         res.setHeader('Content-Type', 'application/json; charset=utf-8');
         res.json(moviesList);
+
     } catch (error) {
-        console.error(error);
+        console.error("خطأ في المسار الأول:", error.message);
         res.json([emptyResponse]);
     }
 });
