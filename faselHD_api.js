@@ -6,7 +6,7 @@ const PORT = process.env.PORT || 3000;
 app.use(express.json());
 
 // ---------------------------------------------------------
-// الهياكل الأساسية والـ Headers
+// الهياكل الأساسية والـ Headers والتعابير المنتظمة (Regex)
 // ---------------------------------------------------------
 const emptyResponse = {
     title: "", link: "", image: "", quality: "", category: "", views: "", imdb: "", type: ""
@@ -42,8 +42,9 @@ const fetchHtmlContent = async (url) => {
 const pCleanup = /&#8211;|–|&#\d+;|&amp;/g;
 const pHtmlEntity = /&[^\s;]+;/g;
 
+
 // ---------------------------------------------------------
-// 1. دوال استخراج بيانات الصفحة الرئيسية (الأحدث والأشهر)
+// 1. دوال استخراج بيانات الصفحة الرئيسية (الأحدث والأشهر - عام)
 // ---------------------------------------------------------
 const extractHomePageData = (html) => {
     const topList = [];
@@ -121,8 +122,109 @@ const extractHomePageData = (html) => {
 
 
 // ---------------------------------------------------------
-// مسارات الصفحة الرئيسية (الأحدث - الأشهر)
+// 2. دالة استخراج أقسام الصفحة الرئيسية (محددة بـ 6 عناصر)
 // ---------------------------------------------------------
+const extractHomeCategories = (html) => {
+    const result = {
+        movies: [],
+        asian: [],
+        anime: [],
+        series: []
+    };
+
+    const sections = html.split(/<section/i);
+
+    for (let i = 1; i < sections.length; i++) {
+        let secHTML = sections[i];
+        let secTitle = "";
+        
+        let mt = secHTML.match(/class="[^"]*h3[^"]*">\s*([^<]+?)\s*</i);
+        if (mt) secTitle = mt[1].trim();
+
+        if (!secTitle) continue;
+
+        // --- 1. الأفلام ---
+        if (secTitle.includes("الأفلام")) {
+            const itemRegex = /<div class="blockMovie">([\s\S]*?)<\/div>\s*<\/div>/gi;
+            let mItem;
+            while ((mItem = itemRegex.exec(secHTML)) !== null && result.movies.length < 6) {
+                const item = mItem[1];
+                const link = item.match(/href="([^"]+)"/i)?.[1] || "";
+                let title = item.match(/alt="([^"]+)"/i)?.[1] || "";
+                title = title.replace(pCleanup, "").replace(pHtmlEntity, "").trim();
+                
+                const image = item.match(/data-src="([^"]+)"/i)?.[1] || "";
+                const quality = item.match(/quality">([^<]+)</i)?.[1]?.trim() || "";
+                const views = item.match(/bviews">[\s\S]*?<\s*\/\s*i\s*>\s*([^<]+)</i)?.[1]?.trim() || "";
+                const category = item.match(/bCat">([^<]+)</i)?.[1]?.trim() || "";
+                const imdb = item.match(/bimdb">[\s\S]*?<\s*\/\s*i\s*>\s*([^<]+)</i)?.[1]?.trim() || "";
+
+                result.movies.push({ title, link, image, quality, views, category, imdb });
+            }
+        }
+        // --- 2. الأسيوية ---
+        else if (secTitle.includes("الأسيوية")) {
+            const itemRegex = /<div class="blockMovie">([\s\S]*?)<\/div>\s*<\/div>/gi;
+            let mItem;
+            while ((mItem = itemRegex.exec(secHTML)) !== null && result.asian.length < 6) {
+                const item = mItem[1];
+                const link = item.match(/href="([^"]+)"/i)?.[1] || "";
+                let title = item.match(/alt="([^"]+)"/i)?.[1] || "";
+                title = title.replace(pCleanup, "").replace(pHtmlEntity, "").trim();
+                
+                const image = item.match(/data-src="([^"]+)"/i)?.[1] || "";
+                const quality = item.match(/quality">([^<]+)</i)?.[1]?.trim() || "";
+                const views = item.match(/bviews">[\s\S]*?<\s*\/\s*i\s*>\s*([^<]+)</i)?.[1]?.trim() || "";
+                const category = item.match(/bCat">([^<]+)</i)?.[1]?.trim() || "";
+
+                result.asian.push({ title, link, image, quality, views, category });
+            }
+        }
+        // --- 3. الأنميات ---
+        else if (secTitle.includes("الأنميات") || secTitle.includes("انميات")) {
+            const itemRegex = /<div class="epDivHome">([\s\S]*?)<\/div>\s*<\/div>/gi;
+            let mItem;
+            while ((mItem = itemRegex.exec(secHTML)) !== null && result.anime.length < 6) {
+                const item = mItem[1];
+                const link = item.match(/href="([^"]+)"/i)?.[1] || "";
+                let title = item.match(/alt="([^"]+)"/i)?.[1] || "";
+                title = title.replace(pCleanup, "").replace(pHtmlEntity, "").trim();
+                
+                const image = item.match(/data-src="([^"]+)"/i)?.[1] || "";
+                const category = item.match(/sCat">([^<]+)</i)?.[1]?.trim() || "";
+                const year = item.match(/sCat">[^<]+<\s*\/\s*span\s*>\s*<span>([^<]+)</i)?.[1]?.trim() || "";
+
+                result.anime.push({ title, link, image, category, year });
+            }
+        }
+        // --- 4. الحلقات المضافة (المسلسلات) ---
+        else if (secTitle.includes("الحلقات المضافة") || secTitle.includes("مسلسلات")) {
+            const itemRegex = /<div class="epDivHome">([\s\S]*?)<\/div>\s*<\/div>/gi;
+            let mItem;
+            while ((mItem = itemRegex.exec(secHTML)) !== null && result.series.length < 6) {
+                const item = mItem[1];
+                const link = item.match(/href="([^"]+)"/i)?.[1] || "";
+                let title = item.match(/alt="([^"]+)"/i)?.[1] || "";
+                title = title.replace(pCleanup, "").replace(pHtmlEntity, "").trim();
+                
+                const image = item.match(/data-src="([^"]+)"/i)?.[1] || "";
+                const status = item.match(/epStatus">([^<]+)</i)?.[1]?.trim() || "";
+                const count = item.match(/<span>(\d+\s*حلقة)</i)?.[1] || "";
+
+                result.series.push({ title, link, image, status, episodes_count: count });
+            }
+        }
+    }
+
+    return result;
+};
+
+
+// =========================================================
+// المسارات (Routes)
+// =========================================================
+
+// مسارات الصفحة الرئيسية العامة
 app.get('/api/page', async (req, res) => {
     const targetUrl = req.query.url;
     if (!targetUrl) return res.json([emptyResponse]);
@@ -141,10 +243,44 @@ app.get('/api/pagetop', async (req, res) => {
     res.json(data.topList.length > 0 ? data.topList : [emptyResponse]);
 });
 
+// مسارات الصفحة الرئيسية المخصصة (أفلام، مسلسلات، الخ)
+app.get('/api/homemovie', async (req, res) => {
+    const targetUrl = req.query.url;
+    if (!targetUrl) return res.json([]);
+    const html = await fetchHtmlContent(targetUrl);
+    if (!html) return res.json([]);
+    const data = extractHomeCategories(html);
+    res.json(data.movies);
+});
 
-// ---------------------------------------------------------
-// مسار 1: استخراج البيانات الأساسية للفيلم / المسلسل
-// ---------------------------------------------------------
+app.get('/api/homeseries', async (req, res) => {
+    const targetUrl = req.query.url;
+    if (!targetUrl) return res.json([]);
+    const html = await fetchHtmlContent(targetUrl);
+    if (!html) return res.json([]);
+    const data = extractHomeCategories(html);
+    res.json(data.series);
+});
+
+app.get('/api/homeasian', async (req, res) => {
+    const targetUrl = req.query.url;
+    if (!targetUrl) return res.json([]);
+    const html = await fetchHtmlContent(targetUrl);
+    if (!html) return res.json([]);
+    const data = extractHomeCategories(html);
+    res.json(data.asian);
+});
+
+app.get('/api/homeanime', async (req, res) => {
+    const targetUrl = req.query.url;
+    if (!targetUrl) return res.json([]);
+    const html = await fetchHtmlContent(targetUrl);
+    if (!html) return res.json([]);
+    const data = extractHomeCategories(html);
+    res.json(data.anime);
+});
+
+// استخراج البيانات الأساسية (تفاصيل وسيرفرات المشاهدة)
 app.get('/api/details', async (req, res) => {
     const targetUrl = req.query.url;
     if (!targetUrl) return res.json([]);
@@ -152,9 +288,9 @@ app.get('/api/details', async (req, res) => {
     const html = await fetchHtmlContent(targetUrl);
     if (!html) return res.json([]);
 
-   // استبدل السطر القديم بهذا:
-let title = html.match(/<div class="h1 title">([\s\S]*?)<\/div>/i)?.[1]?.trim() || "";
-if (title) title = title.replace(pCleanup, "").replace(pHtmlEntity, "").trim();
+    // استخدام التعبير المحدث لمعالجة المسافات
+    let title = html.match(/<div class="h1 title">([\s\S]*?)<\/div>/i)?.[1]?.trim() || "";
+    if (title) title = title.replace(pCleanup, "").replace(pHtmlEntity, "").trim();
 
     const poster = html.match(/<div class="posterImg">[\s\S]*?<img[^>]*src="([^"]+)"/i)?.[1] || "";
     const rating = html.match(/<span class="singleStar">[\s\S]*?<strong>([^<]+)<\/strong>/i)?.[1]?.trim() || "";
@@ -174,7 +310,6 @@ if (title) title = title.replace(pCleanup, "").replace(pHtmlEntity, "").trim();
     const country = html.match(/دولة[^:]*:\s*([^<]+?)\s*(?:<\/span>|$)/i)?.[1]?.trim() || "";
     const language = html.match(/لغة[^:]*:\s*([^<]+?)\s*(?:<\/span>|$)/i)?.[1]?.trim() || "";
 
-    // استخراج السيرفرات
     const serversData = {};
     const mServers = [...html.matchAll(/player_iframe\.location\.href\s*=\s*'([^']+)'/gi)];
     mServers.forEach((match, index) => {
@@ -192,13 +327,11 @@ if (title) title = title.replace(pCleanup, "").replace(pHtmlEntity, "").trim();
     if (country) dataJson.country = country;
     if (language) dataJson.language = language;
 
-    res.json([dataJson]); // وضعناها في مصفوفة لأن كود جافا خاصتك كان يُنشئ Data_output = "[" + ... + "]"
+    res.json([dataJson]);
 });
 
 
-// ---------------------------------------------------------
-// مسار 2: استخراج المواسم
-// ---------------------------------------------------------
+// استخراج المواسم
 app.get('/api/sezon', async (req, res) => {
     const targetUrl = req.query.url;
     if (!targetUrl) return res.json([]);
@@ -221,8 +354,8 @@ app.get('/api/sezon', async (req, res) => {
             const seasonContent = mSeason[2];
 
             const poster = seasonContent.match(/data-src="([^"]+)"/i)?.[1] || "";
-// استبدل السطر القديم بهذا:
-const title = seasonContent.match(/<div class="title">([\s\S]*?)<\/div>/i)?.[1]?.trim() || "";
+            // استخدام التعبير المحدث لمعالجة المسافات
+            const title = seasonContent.match(/<div class="title">([\s\S]*?)<\/div>/i)?.[1]?.trim() || "";
             const views = seasonContent.match(/<i class="fa fa-eye"><\/i>\s*([^<]+)</i)?.[1]?.trim() || "";
             
             let fullLink = seasonLink;
@@ -238,9 +371,7 @@ const title = seasonContent.match(/<div class="title">([\s\S]*?)<\/div>/i)?.[1]?
 });
 
 
-// ---------------------------------------------------------
-// مسار 3: استخراج الحلقات
-// ---------------------------------------------------------
+// استخراج الحلقات
 app.get('/api/eclip', async (req, res) => {
     const targetUrl = req.query.url;
     if (!targetUrl) return res.json([]);
@@ -263,7 +394,7 @@ app.get('/api/eclip', async (req, res) => {
     res.json(episodeList);
 });
 
-
+// تشغيل السيرفر
 app.listen(PORT, () => {
     console.log(`السيرفر يعمل بنجاح، استمتع بالبرمجة! المنفذ: ${PORT}`);
 });
