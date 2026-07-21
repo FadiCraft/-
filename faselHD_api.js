@@ -1,66 +1,120 @@
-// 1. الحصول على الرابط من شريط العنوان مثلاً: yoursite.com/?page=https://website.com
-const urlParams = new URLSearchParams(window.location.search);
-const targetUrl = urlParams.get('page');
+const express = require('express');
+const cheerio = require('cheerio');
+const crypto = require('crypto');
 
-if (targetUrl) {
-    // استخدمنا بروكسي لتفادي مشكلة CORS التي تمنع جلب بيانات من موقع آخر
-    const proxyUrl = `https://api.allorigins.win/get?url=${encodeURIComponent(targetUrl)}`;
+const app = express();
+const PORT = process.env.PORT || 3000;
 
-    fetch(proxyUrl)
-        .then(response => {
-            if (response.ok) return response.json();
-            throw new Error('Network response was not ok.');
-        })
-        .then(data => {
-            // 2. تحويل النص البرمجي المسترجع إلى عناصر HTML يمكن قراءتها
-            const parser = new DOMParser();
-            const doc = parser.parseFromString(data.contents, 'text/html');
+app.use(express.json());
 
-            // 3. البحث عن كل العناصر التي تحمل كلاس postDiv
-            const posts = doc.querySelectorAll('.postDiv');
-            const extractedData = [];
+// الهيكل الموحد للرد
+const emptyResponse = {
+    id: "",
+    title: "",
+    url: "",
+    image: "",
+    genres: "",
+    quality: "",
+    imdb: "",
+    eclip_Num: ""
+};
 
-            posts.forEach(post => {
-                // استخراج الرابط
-                const link = post.querySelector('a') ? post.querySelector('a').href : null;
-                
-                // استخراج رابط الصورة
-                const img = post.querySelector('.imgdiv-class img');
-                const imgSrc = img ? (img.getAttribute('data-src') || img.src) : null;
-                
-                // استخراج العنوان
-                const title = post.querySelector('.h1') ? post.querySelector('.h1').textContent.trim() : null;
-                
-                // استخراج الجودة
-                const quality = post.querySelector('.quality') ? post.querySelector('.quality').textContent.trim() : null;
-                
-                // استخراج المشاهدات
-                const views = post.querySelector('.pViews') ? post.querySelector('.pViews').textContent.trim() : null;
-                
-                // استخراج التصنيفات (الأقسام) لأنها أكثر من عنصر
-                const categories = [];
-                post.querySelectorAll('.cat').forEach(cat => {
-                    categories.push(cat.textContent.trim());
-                });
+// دالة لتوليد الترويسات (Headers) لتجاوز الحظر
+const getHeaders = (targetUrl) => {
+    const urlObj = new URL(targetUrl);
+    return {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
+        "Accept-Language": "ar,en-US;q=0.9,en;q=0.8",
+        "Connection": "keep-alive",
+        "Referer": urlObj.origin + "/", 
+        "Origin": urlObj.origin,
+        "Referrer-Policy": "strict-origin-when-cross-origin"
+    };
+};
 
-                // تجميع البيانات في كائن (Object)
-                extractedData.push({
-                    title: title,
-                    link: link,
-                    image: imgSrc,
-                    quality: quality,
-                    categories: categories,
-                    views: views
-                });
-            });
+// ---------------------------------------------------------
+// مسار استخراج الأفلام من الهيكل الجديد
+// ---------------------------------------------------------
+app.get('/api/page', async (req, res) => {
+    const targetUrl = req.query.url;
 
-            // 4. طباعة النتيجة النهائية كـ JSON
-            console.log("البيانات المستخرجة:", extractedData);
+    if (!targetUrl) return res.json([emptyResponse]);
+
+    try {
+        // جلب الصفحة مع حقن الترويسات
+        const response = await fetch(targetUrl, {
+            method: 'GET',
+            headers: getHeaders(targetUrl)
+        });
+
+        if (!response.ok) {
+            console.error(`خطأ في الاتصال: ${response.status}`);
+            return res.json([emptyResponse]);
+        }
+
+        const html = await response.text();
+        const $ = cheerio.load(html);
+        const moviesList = [];
+
+        // استهداف الكلاس الرئيسي للعنصر في الهيكل الجديد
+        $('div.postDiv').each((index, element) => {
+            const box = $(element);
             
-            // يمكنك هنا عرضها في صفحتك بدلاً من طباعتها في الكونسول
-            // document.body.innerText = JSON.stringify(extractedData, null, 2);
-        })
-        .catch(error => console.error('حدث خطأ أثناء جلب البيانات:', error));
-} else {
-    console.log("لم يتم تمرير رابط في المتغير ?page=");
-}
+            // 1. استخراج الرابط
+            const url = box.find('a').attr('href') || "";
+            
+            // 2. توليد ID من الرابط
+            const id = url ? crypto.createHash('md5').update(url).digest('hex') : "";
+            
+            // 3. استخراج الصورة (استخدام data-src ثم src كبديل)
+            const imgTag = box.find('div.imgdiv-class img');
+            const image = imgTag.attr('data-src') || imgTag.attr('src') || "";
+            
+            // 4. استخراج العنوان
+            const title = box.find('div.h1').text().trim() || "";
+            
+            // 5. استخراج الجودة
+            const quality = box.find('span.quality').text().trim() || "";
+            
+            // 6. استخراج التصنيفات (Genres) ودمجها بفاصلة أو شرطة
+            const genresArray = [];
+            box.find('span.cat').each((i, el) => {
+                genresArray.push($(el).text().trim());
+            });
+            const genres = genresArray.join(' - '); // ستصبح: اكشن - دراما - مغامرات
+            
+            // بما أن هذا هيكل فيلم، رقم الحلقة وتقييم IMDB غير موجودين في هذا الكود تحديداً
+            const eclip_Num = ""; 
+            const imdb = "";
+
+            // إضافة العنصر إلى المصفوفة
+            if (title && url) {
+                moviesList.push({
+                    id,
+                    title,
+                    url,
+                    image,
+                    genres,
+                    quality,
+                    imdb,
+                    eclip_Num
+                });
+            }
+        });
+
+        if (moviesList.length === 0) return res.json([emptyResponse]);
+
+        res.setHeader('Content-Type', 'application/json; charset=utf-8');
+        res.json(moviesList);
+
+    } catch (error) {
+        console.error("خطأ أثناء الاستخراج:", error.message);
+        res.json([emptyResponse]);
+    }
+});
+
+// تشغيل السيرفر
+app.listen(PORT, () => {
+    console.log(`السيرفر يعمل الآن بنجاح على المنفذ: ${PORT}`);
+});
