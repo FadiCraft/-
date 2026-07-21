@@ -394,6 +394,81 @@ app.get('/api/eclip', async (req, res) => {
     res.json(episodeList);
 });
 
+
+
+
+
+
+
+// =========================================================
+// مسار استخراج الحلقة التالية بذكاء
+// =========================================================
+app.get('/api/nextepisode', async (req, res) => {
+    const currentUrl = req.query.url;
+    if (!currentUrl) return res.json({});
+
+    // 1. جلب صفحة الحلقة الحالية
+    const currentHtml = await fetchHtmlContent(currentUrl);
+    if (!currentHtml) return res.json({});
+
+    // 2. تجميع كل الحلقات لمعرفة من هي الحلقة التالية
+    const episodeRegex = /<a href="([^"]+)"([^>]*)>\s*(الحلقة\s+\d+)\s*<\/a>/gi;
+    let episodes = [];
+    let match;
+    
+    while ((match = episodeRegex.exec(currentHtml)) !== null) {
+        episodes.push({
+            link: match[1],
+            attributes: match[2],
+            title: match[3]
+        });
+    }
+
+    let nextEpisodeLink = "";
+    let nextEpisodeTitle = "";
+
+    // البحث عن الحلقة المفعلة "active" وأخذ الحلقة التي بعدها
+    for (let i = 0; i < episodes.length; i++) {
+        if (episodes[i].attributes.includes('active')) {
+            // التحقق إذا كان هناك حلقة تالية (ليست الحلقة الأخيرة)
+            if (i + 1 < episodes.length) {
+                nextEpisodeLink = episodes[i + 1].link;
+                nextEpisodeTitle = episodes[i + 1].title;
+            }
+            break;
+        }
+    }
+
+    // إذا لم يجد حلقة تالية (هذه آخر حلقة)
+    if (!nextEpisodeLink) {
+        return res.json({ message: "No next episode available" });
+    }
+
+    // 3. الدخول بذكاء إلى صفحة الحلقة التالية لجلب سيرفراتها
+    const nextHtml = await fetchHtmlContent(nextEpisodeLink);
+    if (!nextHtml) return res.json({});
+
+    // استخراج الـ ID للحلقة التالية
+    const itemId = nextHtml.match(/رقم[^:]*:\s*#?(\d+)/i)?.[1]?.trim() || "";
+
+    // استخراج السيرفرات للحلقة التالية
+    const serversData = {};
+    const mServers = [...nextHtml.matchAll(/player_iframe\.location\.href\s*=\s*'([^']+)'/gi)];
+    mServers.forEach((match, index) => {
+        serversData[`servers${index + 1}`] = match[1].replace(/&amp;/g, "&"); 
+    });
+
+    // 4. إرجاع النتيجة النهائية الجاهزة للتطبيق
+    res.json({
+        title: nextEpisodeTitle,
+        link: nextEpisodeLink,
+        id: itemId,
+        ...serversData
+    });
+});
+
+
+
 // تشغيل السيرفر
 app.listen(PORT, () => {
     console.log(`السيرفر يعمل بنجاح، استمتع بالبرمجة! المنفذ: ${PORT}`);
