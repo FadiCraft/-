@@ -152,8 +152,9 @@ app.get('/api/details', async (req, res) => {
     const html = await fetchHtmlContent(targetUrl);
     if (!html) return res.json([]);
 
-    let title = html.match(/<div class="h1 title">\s*([^<]+?)\s*(?:<span|$)/i)?.[1] || "";
-    if (title) title = title.replace(pCleanup, "").replace(pHtmlEntity, "").trim();
+   // استبدل السطر القديم بهذا:
+let title = html.match(/<div class="h1 title">([\s\S]*?)<\/div>/i)?.[1]?.trim() || "";
+if (title) title = title.replace(pCleanup, "").replace(pHtmlEntity, "").trim();
 
     const poster = html.match(/<div class="posterImg">[\s\S]*?<img[^>]*src="([^"]+)"/i)?.[1] || "";
     const rating = html.match(/<span class="singleStar">[\s\S]*?<strong>([^<]+)<\/strong>/i)?.[1]?.trim() || "";
@@ -220,7 +221,8 @@ app.get('/api/sezon', async (req, res) => {
             const seasonContent = mSeason[2];
 
             const poster = seasonContent.match(/data-src="([^"]+)"/i)?.[1] || "";
-            const title = seasonContent.match(/<div class="title">([^<]+)</i)?.[1]?.trim() || "";
+// استبدل السطر القديم بهذا:
+const title = seasonContent.match(/<div class="title">([\s\S]*?)<\/div>/i)?.[1]?.trim() || "";
             const views = seasonContent.match(/<i class="fa fa-eye"><\/i>\s*([^<]+)</i)?.[1]?.trim() || "";
             
             let fullLink = seasonLink;
