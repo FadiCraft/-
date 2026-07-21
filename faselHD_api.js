@@ -401,15 +401,17 @@ app.get('/api/eclip', async (req, res) => {
 
 
 // =========================================================
-// مسار استخراج الحلقة التالية بذكاء
+// استخراج الحلقه التاليه 
 // =========================================================
 app.get('/api/nextepisode', async (req, res) => {
     const currentUrl = req.query.url;
-    if (!currentUrl) return res.json({});
+    // إرجاع مصفوفة فارغة إذا لم يتم إرسال رابط
+    if (!currentUrl) return res.json([]);
 
     // 1. جلب صفحة الحلقة الحالية
     const currentHtml = await fetchHtmlContent(currentUrl);
-    if (!currentHtml) return res.json({});
+    // إرجاع مصفوفة فارغة إذا فشل جلب الصفحة
+    if (!currentHtml) return res.json([]);
 
     // 2. تجميع كل الحلقات لمعرفة من هي الحلقة التالية
     const episodeRegex = /<a href="([^"]+)"([^>]*)>\s*(الحلقة\s+\d+)\s*<\/a>/gi;
@@ -439,14 +441,14 @@ app.get('/api/nextepisode', async (req, res) => {
         }
     }
 
-    // إذا لم يجد حلقة تالية (هذه آخر حلقة)
+    // إذا لم يجد حلقة تالية (هذه آخر حلقة) يرجع []
     if (!nextEpisodeLink) {
-        return res.json({ message: "No next episode available" });
+        return res.json([]);
     }
 
     // 3. الدخول بذكاء إلى صفحة الحلقة التالية لجلب سيرفراتها
     const nextHtml = await fetchHtmlContent(nextEpisodeLink);
-    if (!nextHtml) return res.json({});
+    if (!nextHtml) return res.json([]);
 
     // استخراج الـ ID للحلقة التالية
     const itemId = nextHtml.match(/رقم[^:]*:\s*#?(\d+)/i)?.[1]?.trim() || "";
@@ -458,16 +460,14 @@ app.get('/api/nextepisode', async (req, res) => {
         serversData[`servers${index + 1}`] = match[1].replace(/&amp;/g, "&"); 
     });
 
-    // 4. إرجاع النتيجة النهائية الجاهزة للتطبيق
-    res.json({
+    // 4. إرجاع النتيجة النهائية الجاهزة محاطة بـ [ ]
+    res.json([{
         title: nextEpisodeTitle,
         link: nextEpisodeLink,
         id: itemId,
         ...serversData
-    });
+    }]);
 });
-
-
 
 // تشغيل السيرفر
 app.listen(PORT, () => {
