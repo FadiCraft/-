@@ -19,6 +19,9 @@ const emptyResponse = {
     eclip_Num: ""
 };
 
+// 🧠 ذاكرة مؤقتة بسيطة لتخزين صور الأفلام لتقليل الطلبات للصفر عند التكرار
+const imageCache = new Map();
+
 // دالة مساعدة لتعديل الروابط (تغيير video إلى play وتحويل الروابط النسبية لكاملة)
 function formatUrl(url, baseUrl) {
     if (!url) return "";
@@ -38,10 +41,20 @@ function cleanImageUrl(imgTag, baseUrl) {
     return url;
 }
 
-
+// ⚡ دالة مساعدة لتقسيم المصفوفة وتنفيذ الطلبات على دفعات متتابعة
+async function processInBatches(items, batchSize, asyncFn) {
+    const results = [];
+    for (let i = 0; i < items.length; i += batchSize) {
+        const batch = items.slice(i, i + batchSize);
+        // تنفيذ الدفعة الحالية بالتوازي
+        const batchResults = await Promise.all(batch.map(asyncFn));
+        results.push(...batchResults);
+    }
+    return results;
+}
 
 // ---------------------------------------------------------
-// المسار الأول: استخراج الأفلام والمسلسلات (بالدخول لصفحة الفيلم لجلب الصورة)
+// المسار الأول: استخراج الأفلام والمسلسلات (معالج بالدفعات + Timeout + Cache)
 // ---------------------------------------------------------
 app.get('/api/page', async (req, res) => {
     const targetUrl = req.query.url;
@@ -96,17 +109,26 @@ app.get('/api/page', async (req, res) => {
             });
         });
 
-        // الدخول لصفحات الأفلام كلها في نفس الوقت لجلب الصورة (سريع جداً)
-        const finalMoviesList = await Promise.all(tempItems.map(async (item) => {
+        // 🚀 معالجة العناصر على دفعات (8 عناصر فقط في كل مرة لتخفيف الضغط)
+        const BATCH_SIZE = 8;
+        
+        const finalMoviesList = await processInBatches(tempItems, BATCH_SIZE, async (item) => {
+            // 1. التحقق أولاً إذا كانت الصورة محفوظة في الذاكرة المؤقتة (Cache)
+            if (imageCache.has(item.fetchUrl)) {
+                return { ...item, image: imageCache.get(item.fetchUrl), fetchUrl: undefined };
+            }
+
             try {
+                // 2. إرسال الطلب مع مهلة أقصاها 2.5 ثانية لكل فيلم تجنباً للمماطلة
                 const pageResponse = await fetch(item.fetchUrl, {
-                    headers: { "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)" }
+                    headers: { "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)" },
+                    signal: AbortSignal.timeout(2500) 
                 });
                 
                 const pageHtml = await pageResponse.text();
                 const $$ = cheerio.load(pageHtml);
                 
-                // استخراج الصورة من <link rel="image_src"> كما طلبت
+                // استخراج الصورة من <link rel="image_src"> أو meta
                 let imageUrl = $$('link[rel="image_src"]').attr('href') || 
                                $$('meta[property="og:image"]').attr('content') || "";
                 
@@ -115,7 +137,10 @@ app.get('/api/page', async (req, res) => {
                     imageUrl = new URL(imageUrl, baseUrl).href;
                 }
 
-                // إرجاع العنصر بعد إضافة الصورة وإزالة رابط الـ fetchUrl المؤقت
+                // حفظ الصورة في الكاش للمرات القادمة
+                if (imageUrl) imageCache.set(item.fetchUrl, imageUrl);
+
+                // إرجاع العنصر بعد إضافة الصورة
                 return {
                     id: item.id,
                     title: item.title,
@@ -127,7 +152,7 @@ app.get('/api/page', async (req, res) => {
                     eclip_Num: item.eclip_Num
                 };
             } catch (err) {
-                // في حال فشل جلب صورة فيلم معين، نرجع العنصر بدون صورة بدلاً من إيقاف الكود كاملاً
+                // في حال انتهاء الوقت (Timeout) أو حدوث خطأ، نرجع العنصر بدون صورة بدلاً من إيقاف الكود كاملاً
                 return {
                     id: item.id,
                     title: item.title,
@@ -139,7 +164,7 @@ app.get('/api/page', async (req, res) => {
                     eclip_Num: item.eclip_Num
                 };
             }
-        }));
+        });
 
         if (finalMoviesList.length === 0) return res.json([emptyResponse]);
 
@@ -151,7 +176,6 @@ app.get('/api/page', async (req, res) => {
         res.json([emptyResponse]);
     }
 });
-
 
 // ---------------------------------------------------------
 // المسار الثاني: استخراج المواسم
@@ -171,7 +195,7 @@ app.get('/api/seasons', async (req, res) => {
         const $ = cheerio.load(html);
         const seasonsList = [];
 
-        // استخراج صورة الموسم من الميتا تاج كما طلبت
+        // استخراج صورة الموسم من الميتا تاج
         const metaImage = $('meta[property="og:image"]').attr('content') || "";
 
         $('div.SeasonsBoxUL ul li').each((index, element) => {
@@ -214,10 +238,9 @@ app.get('/api/episodes', async (req, res) => {
     if (!targetUrl) return res.json([emptyResponse]);
 
     try {
-        // استخراج رقم الموسم سواء كان داخل الرابط المشفر أو تم فصله كمتغير مستقل بواسطة Express
-        let seasonId = req.query.season_id; // إذا كان مفصولاً
+        // استخراج رقم الموسم
+        let seasonId = req.query.season_id; 
         if (!seasonId) {
-            // إذا كان لا يزال داخل الرابط
             const urlObj = new URL(targetUrl);
             seasonId = urlObj.searchParams.get('season_id');
         }
@@ -244,7 +267,6 @@ app.get('/api/episodes', async (req, res) => {
         if (seasonId) {
             episodesContainer = $(`div.SeasonsEpisodes[data-serie="${seasonId}"]`);
         } else {
-            // إذا لم يتم العثور على أي رقم موسم، اسحب الموسم الأول كاحتياطي
             episodesContainer = $('div.SeasonsEpisodes').first();
         }
 
@@ -258,10 +280,8 @@ app.get('/api/episodes', async (req, res) => {
             episodeUrl = episodeUrl.replace('/video.php?vid=', '/play.php?vid=');
 
             const title = aTag.attr('title') || aTag.text().trim() || "";
-            
             const epNumText = aTag.find('em').text().trim();
             const eclip_Num = epNumText ? `الحلقة ${epNumText}` : "";
-
             const id = crypto.createHash('md5').update(episodeUrl).digest('hex');
 
             episodesList.push({
@@ -288,7 +308,7 @@ app.get('/api/episodes', async (req, res) => {
 });
 
 // ---------------------------------------------------------
-// المسار الرابع: استخراج السيرفرات (تم التعديل ليصبح الرابط الأساسي أولاً)
+// المسار الرابع: استخراج السيرفرات
 // ---------------------------------------------------------
 app.get('/api/watch', async (req, res) => {
     let targetUrl = req.query.url;
@@ -339,6 +359,7 @@ app.get('/api/watch', async (req, res) => {
         return res.json([{ url: targetUrl }]);
     }
 });
+
 // ---------------------------------------------------------
 // تشغيل السيرفر
 // ---------------------------------------------------------
