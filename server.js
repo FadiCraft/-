@@ -256,7 +256,7 @@ app.get('/api/watch', async (req, res) => {
         });
 
         // 3. تجربة السيرفرات بالترتيب وتخزين الشغال منها
-        const serverUrl = "https://topcinma.com/wp-content/themes/movies2023/Ajaxat/Single/Server.php";
+        const serverUrl = "https://topcinemaa.cc/wp-content/themes/movies2023/Ajaxat/Single/Server.php";
         const validServers = []; // مصفوفة لتخزين السيرفرات الشغالة
         
         for (let i of serverIndexes) {
