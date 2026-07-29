@@ -19,7 +19,7 @@ const emptyResponse = {
     eclip_Num: ""
 };
 
-// 🧠 ذاكرة مؤقتة بسيطة لتخزين صور الأفلام لتقليل الطلبات للصفر عند التكرار
+// 🧠 ذاكرة مؤقتة لتخزين روابط الصور التي تم استخراجها سابقاً لعدم تكرار الطلبات
 const imageCache = new Map();
 
 // دالة مساعدة لتعديل الروابط (تغيير video إلى play وتحويل الروابط النسبية لكاملة)
@@ -41,20 +41,8 @@ function cleanImageUrl(imgTag, baseUrl) {
     return url;
 }
 
-// ⚡ دالة مساعدة لتقسيم المصفوفة وتنفيذ الطلبات على دفعات متتابعة
-async function processInBatches(items, batchSize, asyncFn) {
-    const results = [];
-    for (let i = 0; i < items.length; i += batchSize) {
-        const batch = items.slice(i, i + batchSize);
-        // تنفيذ الدفعة الحالية بالتوازي
-        const batchResults = await Promise.all(batch.map(asyncFn));
-        results.push(...batchResults);
-    }
-    return results;
-}
-
 // ---------------------------------------------------------
-// المسار الأول: استخراج الأفلام والمسلسلات (معالج بالدفعات + Timeout + Cache)
+// المسار الأول: استخراج الأفلام والمسلسلات (إصدار فائق السرعة)
 // ---------------------------------------------------------
 app.get('/api/page', async (req, res) => {
     const targetUrl = req.query.url;
@@ -74,22 +62,19 @@ app.get('/api/page', async (req, res) => {
         const $ = cheerio.load(html);
         const baseUrl = new URL(targetUrl).origin;
         
-        // مصفوفة مؤقتة لتخزين البيانات الأساسية قبل جلب الصور
-        const tempItems = [];
+        // بناء رابط السيرفر لطلب الصور عبر المسار الديناميكي
+        const host = req.protocol + '://' + req.get('host');
+        const finalMoviesList = [];
 
-        // استخراج البيانات من الصفحة الرئيسية بحد أقصى 30 عنصر
+        // استخراج البيانات المباشرة من الصفحة بدون انتظار صفحات التفاصيل
         $('li.col-xs-6.col-sm-4.col-md-3').each((index, element) => {
             if (index >= 30) return false; // التوقف عند 30 عنصر
 
             const box = $(element);
-            
-            // الرابط الأصلي الذي سندخل عليه لجلب الصورة
             const rawUrl = box.find('a').first().attr('href') || "";
-            if (!rawUrl) return true; // تخطي إذا لم يكن هناك رابط
+            if (!rawUrl) return true;
 
             const fetchUrl = rawUrl.startsWith('http') ? rawUrl : new URL(rawUrl, baseUrl).href;
-            
-            // الرابط النهائي الذي سيتم عرضه في التطبيق (معدل لـ play.php)
             const movieUrl = formatUrl(rawUrl, baseUrl);
             
             const title = box.find('.caption h3 a').text().trim() || box.find('a').first().attr('title') || "";
@@ -97,73 +82,17 @@ app.get('/api/page', async (req, res) => {
             const eclip_Num = box.find('.pm-label-duration').text().trim() || "";
             const id = movieUrl ? crypto.createHash('md5').update(movieUrl).digest('hex') : "";
 
-            tempItems.push({
+            finalMoviesList.push({
                 id, 
                 title, 
-                url: movieUrl, // الرابط النهائي للتطبيق
-                fetchUrl,      // الرابط المؤقت لاستخراج الصورة
+                url: movieUrl,
+                // نرسل رابط الصورة إلى مسار معالجة الصور الديناميكي في سيرفرك
+                image: `${host}/api/image?url=${encodeURIComponent(fetchUrl)}&baseUrl=${encodeURIComponent(baseUrl)}`,
                 quality, 
                 eclip_Num,
                 genres: "",
                 imdb: ""
             });
-        });
-
-        // 🚀 معالجة العناصر على دفعات (8 عناصر فقط في كل مرة لتخفيف الضغط)
-        const BATCH_SIZE = 8;
-        
-        const finalMoviesList = await processInBatches(tempItems, BATCH_SIZE, async (item) => {
-            // 1. التحقق أولاً إذا كانت الصورة محفوظة في الذاكرة المؤقتة (Cache)
-            if (imageCache.has(item.fetchUrl)) {
-                return { ...item, image: imageCache.get(item.fetchUrl), fetchUrl: undefined };
-            }
-
-            try {
-                // 2. إرسال الطلب مع مهلة أقصاها 2.5 ثانية لكل فيلم تجنباً للمماطلة
-                const pageResponse = await fetch(item.fetchUrl, {
-                    headers: { "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)" },
-                    signal: AbortSignal.timeout(2500) 
-                });
-                
-                const pageHtml = await pageResponse.text();
-                const $$ = cheerio.load(pageHtml);
-                
-                // استخراج الصورة من <link rel="image_src"> أو meta
-                let imageUrl = $$('link[rel="image_src"]').attr('href') || 
-                               $$('meta[property="og:image"]').attr('content') || "";
-                
-                // التأكد من أن الرابط كامل
-                if (imageUrl && !imageUrl.startsWith('http')) {
-                    imageUrl = new URL(imageUrl, baseUrl).href;
-                }
-
-                // حفظ الصورة في الكاش للمرات القادمة
-                if (imageUrl) imageCache.set(item.fetchUrl, imageUrl);
-
-                // إرجاع العنصر بعد إضافة الصورة
-                return {
-                    id: item.id,
-                    title: item.title,
-                    url: item.url,
-                    image: imageUrl,
-                    genres: item.genres,
-                    quality: item.quality,
-                    imdb: item.imdb,
-                    eclip_Num: item.eclip_Num
-                };
-            } catch (err) {
-                // في حال انتهاء الوقت (Timeout) أو حدوث خطأ، نرجع العنصر بدون صورة بدلاً من إيقاف الكود كاملاً
-                return {
-                    id: item.id,
-                    title: item.title,
-                    url: item.url,
-                    image: "",
-                    genres: item.genres,
-                    quality: item.quality,
-                    imdb: item.imdb,
-                    eclip_Num: item.eclip_Num
-                };
-            }
         });
 
         if (finalMoviesList.length === 0) return res.json([emptyResponse]);
@@ -174,6 +103,51 @@ app.get('/api/page', async (req, res) => {
     } catch (error) {
         console.error("خطأ في المسار الأول:", error.message);
         res.json([emptyResponse]);
+    }
+});
+
+// ---------------------------------------------------------
+// المسار المساعد: استخراج الصورة والتوجيه إليها (Dynamic Image Proxy)
+// ---------------------------------------------------------
+app.get('/api/image', async (req, res) => {
+    const targetUrl = req.query.url;
+    const baseUrl = req.query.baseUrl;
+    
+    // رابط صورة افتراضية في حال تعذر جلب الصورة
+    const fallbackImage = "https://via.placeholder.com/300x450?text=No+Image";
+
+    if (!targetUrl) return res.redirect(fallbackImage);
+
+    // 1. العودة للصورة المحفوظة في الكاش فوراً إن وجدت
+    if (imageCache.has(targetUrl)) {
+        return res.redirect(imageCache.get(targetUrl));
+    }
+
+    try {
+        // 2. طلب الصفحة الداخلية للفيلم بمهلة 2.5 ثانية
+        const pageResponse = await fetch(targetUrl, {
+            headers: { "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)" },
+            signal: AbortSignal.timeout(2500) 
+        });
+        
+        const pageHtml = await pageResponse.text();
+        const $$ = cheerio.load(pageHtml);
+        
+        let imageUrl = $$('link[rel="image_src"]').attr('href') || 
+                       $$('meta[property="og:image"]').attr('content') || "";
+        
+        if (imageUrl && !imageUrl.startsWith('http')) {
+            imageUrl = new URL(imageUrl, baseUrl).href;
+        }
+
+        if (imageUrl) {
+            imageCache.set(targetUrl, imageUrl);
+            return res.redirect(imageUrl);
+        } else {
+            return res.redirect(fallbackImage);
+        }
+    } catch (err) {
+        return res.redirect(fallbackImage);
     }
 });
 
@@ -195,7 +169,6 @@ app.get('/api/seasons', async (req, res) => {
         const $ = cheerio.load(html);
         const seasonsList = [];
 
-        // استخراج صورة الموسم من الميتا تاج
         const metaImage = $('meta[property="og:image"]').attr('content') || "";
 
         $('div.SeasonsBoxUL ul li').each((index, element) => {
@@ -203,7 +176,6 @@ app.get('/api/seasons', async (req, res) => {
             const seasonNumber = li.attr('data-serie') || "";
             const title = li.text().trim() || `الموسم ${seasonNumber}`;
             
-            // تجهيز رابط الموسم لكي يقرأه مسار الحلقات لاحقاً
             const seasonUrl = `${targetUrl}&season_id=${seasonNumber}`;
             const id = seasonUrl ? crypto.createHash('md5').update(seasonUrl).digest('hex') : "";
 
@@ -211,7 +183,7 @@ app.get('/api/seasons', async (req, res) => {
                 id: id,
                 title: title,
                 url: seasonUrl,
-                image: metaImage, // إضافة الصورة الموحدة للمواسم
+                image: metaImage,
                 genres: "",
                 quality: "",
                 imdb: "",
@@ -238,7 +210,6 @@ app.get('/api/episodes', async (req, res) => {
     if (!targetUrl) return res.json([emptyResponse]);
 
     try {
-        // استخراج رقم الموسم
         let seasonId = req.query.season_id; 
         if (!seasonId) {
             const urlObj = new URL(targetUrl);
@@ -262,7 +233,6 @@ app.get('/api/episodes', async (req, res) => {
 
         const episodesList = [];
         
-        // تحديد الـ div المطلوب بناءً على رقم الموسم
         let episodesContainer;
         if (seasonId) {
             episodesContainer = $(`div.SeasonsEpisodes[data-serie="${seasonId}"]`);
@@ -322,10 +292,7 @@ app.get('/api/watch', async (req, res) => {
         const html = await response.text();
         const $ = cheerio.load(html);
         
-        // 1. نبدأ المصفوفة بالرابط الأساسي ليكون دائماً هو الأول
         const validServers = [{ url: targetUrl }];
-
-        // 2. استخراج الروابط من القائمة
         const listItems = $('ul.WatchList li');
         const blockedDomains = ['llvpn', 'ads', 'pop', 'blank', 'd0o0d', 'updown.icu'];
 
@@ -334,7 +301,6 @@ app.get('/api/watch', async (req, res) => {
             const iframeSrc = li.attr('data-embed-url') || "";
             const isBlocked = blockedDomains.some(d => iframeSrc.includes(d));
 
-            // نتأكد من عدم إضافة الرابط الأساسي مرة أخرى إذا ظهر في القائمة
             if (iframeSrc && iframeSrc.startsWith('http') && !isBlocked && iframeSrc !== targetUrl) {
                 validServers.push({
                     url: iframeSrc
@@ -342,7 +308,6 @@ app.get('/api/watch', async (req, res) => {
             }
         });
 
-        // 3. الخطة الاحتياطية: إذا لم نجد سيرفرات في القائمة، نبحث عن iframe مباشر
         if (validServers.length === 1) {
             const directIframe = $('iframe').first().attr('src');
             if (directIframe && directIframe.startsWith('http') && directIframe !== targetUrl) {
@@ -355,7 +320,6 @@ app.get('/api/watch', async (req, res) => {
 
     } catch (error) {
         console.error("خطأ السيرفرات:", error.message);
-        // في حال حدوث خطأ، نرجع الرابط الأساسي فقط لضمان عمل التطبيق
         return res.json([{ url: targetUrl }]);
     }
 });
