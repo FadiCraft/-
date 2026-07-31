@@ -3,77 +3,105 @@ const app = express();
 
 app.set('json spaces', 2);
 
-// 1. دالة استخراج الروابط من استجابة الـ API
-function extractValidDownloads(data) {
-    let validDownloads = [];
+// القالب الثابت الذي سيتم إرجاعه في كل الحالات
+const DEFAULT_RESPONSE = [{
+    "id": "",
+    "title": "",
+    "img": "",
+    "quality_144P": "",
+    "quality_360P": "",
+    "quality_720P": "",
+    "quality_1080P": "",
+    "quality_MP3": ""
+}];
 
-    function search(obj) {
-        if (Array.isArray(obj)) {
-            obj.forEach(item => search(item));
-        } else if (obj !== null && typeof obj === 'object') {
-            if (obj.download_url && obj.download_url.trim() !== "") {
-                validDownloads.push({
-                    format: (obj.format || "Unknown").toUpperCase(),
-                    quality: (obj.quality || "Unknown").toUpperCase(),
-                    download_url: obj.download_url
-                });
-            }
-            Object.values(obj).forEach(val => search(val));
-        }
-    }
-
-    search(data);
-    return validDownloads;
-}
-
-// 2. دالة لاستبقاء أفضل ملف MP3 فقط
-function keepBestMp3Only(downloads) {
-    const mp3Files = downloads.filter(d => d.format.includes('MP3') || d.format.includes('AUDIO'));
-    const otherFiles = downloads.filter(d => !d.format.includes('MP3') && !d.format.includes('AUDIO'));
-
-    if (mp3Files.length > 0) {
-        // ترتيب الـ MP3 حسب الجودة (استخراج الرقم وترتيبه تنازلياً)
-        mp3Files.sort((a, b) => {
-            let qualityA = parseInt(a.quality.replace(/\D/g, '')) || 0;
-            let qualityB = parseInt(b.quality.replace(/\D/g, '')) || 0;
-            return qualityB - qualityA; 
-        });
-
-        // الاحتفاظ بأفضل جودة فقط
-        otherFiles.push(mp3Files[0]);
-    }
-
-    return otherFiles;
-}
-
-// 3. دالة ذكية لفحص الرابط بدون التسبب برفض السيرفرات (المشكلة السابقة)
+// دالة ذكية لفحص الرابط (تعيد الرابط إذا كان يعمل، أو "" إذا كان معطلاً)
 async function checkUrlIsAlive(url) {
+    if (!url) return "";
     try {
         const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), 6000); // إيقاف الفحص بعد 6 ثوانٍ
+        const timeoutId = setTimeout(() => controller.abort(), 6000); // 6 ثوانٍ كحد أقصى
 
-        // نستخدم HEAD لطلب حالة الملف فقط
         const response = await fetch(url, {
             method: 'HEAD',
             headers: {
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'
             },
             signal: controller.signal
         });
 
         clearTimeout(timeoutId);
 
-        // نعتبر الرابط "معطلاً" فقط إذا كان غير موجود (404) أو محذوف (410) أو طلب خاطئ (400)
-        // إذا كان 403 (مرفوض) فهذا يعني أن الملف موجود ولكن السيرفر يمنع فحصه، لذا نحتفظ به
         if (response.status === 404 || response.status === 410 || response.status === 400) {
             return ""; 
         }
-        
         return url; 
     } catch (error) {
-        // إذا كان هناك فشل كامل في الاتصال (السيرفر لا يرد أبداً أو انتهى الوقت)
         return "";
     }
+}
+
+// دالة للبحث واستخراج البيانات وترتيبها في الهيكل المطلوب
+function parseAndFormatData(data) {
+    let result = {
+        id: "",
+        title: "",
+        img: "",
+        quality_144P: "",
+        quality_360P: "",
+        quality_720P: "",
+        quality_1080P: "",
+        quality_MP3: ""
+    };
+
+    let mp3Links = [];
+
+    function search(obj) {
+        if (Array.isArray(obj)) {
+            obj.forEach(item => search(item));
+        } else if (obj !== null && typeof obj === 'object') {
+            
+            // استخراج البيانات الأساسية (أول قيمة يجدها)
+            if (!result.id && obj.id) result.id = String(obj.id);
+            if (!result.title && obj.title) result.title = String(obj.title);
+            if (!result.img && (obj.thumbnail || obj.picture || obj.thumb || obj.image)) {
+                result.img = String(obj.thumbnail || obj.picture || obj.thumb || obj.image);
+            }
+
+            // استخراج وتصنيف الروابط
+            if (obj.download_url && obj.download_url.trim() !== "") {
+                let format = (obj.format || "").toUpperCase();
+                let quality = (obj.quality || "").toUpperCase();
+                let url = obj.download_url;
+
+                if (format.includes("MP3") || format.includes("AUDIO")) {
+                    mp3Links.push({ url, quality });
+                } else {
+                    // توزيع جودات الفيديو (نأخذ أول رابط نجده لكل جودة)
+                    if (quality.includes("144") && !result.quality_144P) result.quality_144P = url;
+                    if (quality.includes("360") && !result.quality_360P) result.quality_360P = url;
+                    if (quality.includes("720") && !result.quality_720P) result.quality_720P = url;
+                    if (quality.includes("1080") && !result.quality_1080P) result.quality_1080P = url;
+                }
+            }
+
+            Object.values(obj).forEach(val => search(val));
+        }
+    }
+
+    search(data);
+
+    // اختيار أفضل جودة MP3 إن وجدت
+    if (mp3Links.length > 0) {
+        mp3Links.sort((a, b) => {
+            let qa = parseInt(a.quality.replace(/\D/g, '')) || 0;
+            let qb = parseInt(b.quality.replace(/\D/g, '')) || 0;
+            return qb - qa; // ترتيب تنازلي
+        });
+        result.quality_MP3 = mp3Links[0].url;
+    }
+
+    return result;
 }
 
 // إعداد مسار الـ API
@@ -81,7 +109,7 @@ app.get('/api/extract', async (req, res) => {
     const videoUrl = req.query.url; 
     
     if (!videoUrl) {
-        return res.status(400).json({ error: "الرجاء توفير رابط الفيديو" });
+        return res.json(DEFAULT_RESPONSE); // في حال لم يرسل المستخدم رابطاً
     }
 
     const apiUrl = "https://api.vidssave.com/api/contentsite_api/media/parse";
@@ -99,37 +127,35 @@ app.get('/api/extract', async (req, res) => {
                 "Content-Type": "application/x-www-form-urlencoded",
                 "Origin": "https://ar.vidssave.com",
                 "Referer": "https://ar.vidssave.com/",
-                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
             },
             body: formData
         });
         
         const rawData = await response.json();
         
-        // 1. استخراج الروابط
-        let filteredData = extractValidDownloads(rawData);
+        // ترتيب البيانات في الهيكل الثابت
+        let formattedData = parseAndFormatData(rawData);
         
-        // 2. إبقاء أفضل ملف MP3 فقط
-        filteredData = keepBestMp3Only(filteredData);
+        // فحص الروابط بالتوازي للتأكد من أنها تعمل
+        const finalResult = {
+            id: formattedData.id,
+            title: formattedData.title,
+            img: formattedData.img,
+            quality_144P: await checkUrlIsAlive(formattedData.quality_144P),
+            quality_360P: await checkUrlIsAlive(formattedData.quality_360P),
+            quality_720P: await checkUrlIsAlive(formattedData.quality_720P),
+            quality_1080P: await checkUrlIsAlive(formattedData.quality_1080P),
+            quality_MP3: await checkUrlIsAlive(formattedData.quality_MP3)
+        };
         
-        // 3. فحص الروابط بشكل متوازي
-        const finalDownloads = await Promise.all(filteredData.map(async (item) => {
-            const aliveUrl = await checkUrlIsAlive(item.download_url);
-            return {
-                ...item,
-                download_url: aliveUrl 
-            };
-        }));
-        
-        res.json({
-            success: true,
-            total_links: finalDownloads.length,
-            downloads: finalDownloads
-        }); 
+        // إرجاع النتيجة كمصفوفة بداخلها الكائن
+        res.json([finalResult]); 
 
     } catch (error) {
         console.error("Fetch Error:", error);
-        res.status(500).json({ error: "حدث خطأ أثناء الاتصال بالخادم الخارجي" });
+        // في حال حدوث أي خطأ مفاجئ، نرجع الهيكل الثابت فارغاً
+        res.json(DEFAULT_RESPONSE);
     }
 });
 
