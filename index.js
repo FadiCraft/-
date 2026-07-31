@@ -1,6 +1,34 @@
 const express = require('express');
 const app = express();
 
+// إعداد التنسيق لجعل مخرجات JSON مرتبة ومقروءة بشكل جميل
+app.set('json spaces', 2);
+
+// دالة ذكية للبحث في الرد واستخراج الروابط الصالحة فقط
+function extractValidDownloads(data) {
+    let validDownloads = [];
+
+    function search(obj) {
+        if (Array.isArray(obj)) {
+            obj.forEach(item => search(item));
+        } else if (obj !== null && typeof obj === 'object') {
+            // إذا كان الكائن يحتوي على رابط تحميل غير فارغ
+            if (obj.download_url && obj.download_url.trim() !== "") {
+                validDownloads.push({
+                    format: obj.format || "Unknown",
+                    quality: obj.quality || "Unknown",
+                    download_url: obj.download_url
+                });
+            }
+            // الاستمرار في البحث داخل باقي الخصائص (تحسباً لوجود مصفوفات متداخلة)
+            Object.values(obj).forEach(val => search(val));
+        }
+    }
+
+    search(data);
+    return validDownloads;
+}
+
 // إعداد مسار الـ API
 app.get('/api/extract', async (req, res) => {
     // جلب الرابط من المعاملات المرسلة في الرابط (Query Parameters)
@@ -31,10 +59,17 @@ app.get('/api/extract', async (req, res) => {
             body: formData
         });
         
-        const data = await response.json();
+        const rawData = await response.json();
         
-        // إرجاع النتيجة للتطبيق بصيغة JSON
-        res.json(data); 
+        // تصفية البيانات واستخراج الجودات وملفات الصوت التي تحتوي على روابط فقط
+        const filteredData = extractValidDownloads(rawData);
+        
+        // إرجاع النتيجة للتطبيق بصيغة JSON مرتبة وواضحة
+        res.json({
+            success: true,
+            total_links: filteredData.length,
+            downloads: filteredData
+        }); 
 
     } catch (error) {
         console.error("Fetch Error:", error);
