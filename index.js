@@ -61,7 +61,7 @@ function parseAndFormatData(data) {
             obj.forEach(item => search(item));
         } else if (obj !== null && typeof obj === 'object') {
             
-            // استخراج البيانات الأساسية (أول قيمة يجدها)
+            // استخراج البيانات الأساسية
             if (!result.id && obj.id) result.id = String(obj.id);
             if (!result.title && obj.title) result.title = String(obj.title);
             if (!result.img && (obj.thumbnail || obj.picture || obj.thumb || obj.image)) {
@@ -77,7 +77,7 @@ function parseAndFormatData(data) {
                 if (format.includes("MP3") || format.includes("AUDIO")) {
                     mp3Links.push({ url, quality });
                 } else {
-                    // توزيع جودات الفيديو (نأخذ أول رابط نجده لكل جودة)
+                    // توزيع جودات الفيديو
                     if (quality.includes("144") && !result.quality_144P) result.quality_144P = url;
                     if (quality.includes("360") && !result.quality_360P) result.quality_360P = url;
                     if (quality.includes("720") && !result.quality_720P) result.quality_720P = url;
@@ -91,12 +91,13 @@ function parseAndFormatData(data) {
 
     search(data);
 
-    // اختيار أفضل جودة MP3 إن وجدت
+    // اختيار **أقل** جودة MP3 متوفرة لتوفير استهلاك البيانات
     if (mp3Links.length > 0) {
         mp3Links.sort((a, b) => {
             let qa = parseInt(a.quality.replace(/\D/g, '')) || 0;
             let qb = parseInt(b.quality.replace(/\D/g, '')) || 0;
-            return qb - qa; // ترتيب تنازلي
+            // ترتيب تصاعدي: الأقل جودة سيكون في البداية (index 0)
+            return qa - qb; 
         });
         result.quality_MP3 = mp3Links[0].url;
     }
@@ -109,7 +110,7 @@ app.get('/api/extract', async (req, res) => {
     const videoUrl = req.query.url; 
     
     if (!videoUrl) {
-        return res.json(DEFAULT_RESPONSE); // في حال لم يرسل المستخدم رابطاً
+        return res.json(DEFAULT_RESPONSE); 
     }
 
     const apiUrl = "https://api.vidssave.com/api/contentsite_api/media/parse";
@@ -149,12 +150,11 @@ app.get('/api/extract', async (req, res) => {
             quality_MP3: await checkUrlIsAlive(formattedData.quality_MP3)
         };
         
-        // إرجاع النتيجة كمصفوفة بداخلها الكائن
+        // إرجاع النتيجة
         res.json([finalResult]); 
 
     } catch (error) {
         console.error("Fetch Error:", error);
-        // في حال حدوث أي خطأ مفاجئ، نرجع الهيكل الثابت فارغاً
         res.json(DEFAULT_RESPONSE);
     }
 });
