@@ -28,51 +28,50 @@ function extractValidDownloads(data) {
 
 // 2. دالة لاستبقاء أفضل ملف MP3 فقط
 function keepBestMp3Only(downloads) {
-    // فصل الـ MP3 عن باقي الملفات (الفيديو)
     const mp3Files = downloads.filter(d => d.format.includes('MP3') || d.format.includes('AUDIO'));
     const otherFiles = downloads.filter(d => !d.format.includes('MP3') && !d.format.includes('AUDIO'));
 
     if (mp3Files.length > 0) {
-        // ترتيب الـ MP3 حسب الجودة (استخراج الرقم من النص، مثلاً 320 من 320kbps)
+        // ترتيب الـ MP3 حسب الجودة (استخراج الرقم وترتيبه تنازلياً)
         mp3Files.sort((a, b) => {
             let qualityA = parseInt(a.quality.replace(/\D/g, '')) || 0;
             let qualityB = parseInt(b.quality.replace(/\D/g, '')) || 0;
-            return qualityB - qualityA; // ترتيب تنازلي (الأعلى أولاً)
+            return qualityB - qualityA; 
         });
 
-        // إضافة أفضل ملف MP3 فقط إلى باقي الملفات
+        // الاحتفاظ بأفضل جودة فقط
         otherFiles.push(mp3Files[0]);
     }
 
     return otherFiles;
 }
 
-// 3. دالة لفحص الرابط إذا كان يعمل أو لا
+// 3. دالة ذكية لفحص الرابط بدون التسبب برفض السيرفرات (المشكلة السابقة)
 async function checkUrlIsAlive(url) {
     try {
         const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), 5000); // إيقاف الفحص بعد 5 ثوانٍ إذا لم يرد الخادم
+        const timeoutId = setTimeout(() => controller.abort(), 6000); // إيقاف الفحص بعد 6 ثوانٍ
 
-        // نستخدم GET مع طلب أول بايت فقط (Range: bytes=0-0) لتجنب تحميل الملف كاملاً
+        // نستخدم HEAD لطلب حالة الملف فقط
         const response = await fetch(url, {
-            method: 'GET',
+            method: 'HEAD',
             headers: {
-                'Range': 'bytes=0-0', 
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
             },
             signal: controller.signal
         });
 
         clearTimeout(timeoutId);
 
-        // إذا كانت الاستجابة 200 (OK) أو 206 (Partial Content) فالرابط يعمل
-        if (response.ok || response.status === 206) {
-            return url;
-        } else {
-            return ""; // الرابط لا يعمل
+        // نعتبر الرابط "معطلاً" فقط إذا كان غير موجود (404) أو محذوف (410) أو طلب خاطئ (400)
+        // إذا كان 403 (مرفوض) فهذا يعني أن الملف موجود ولكن السيرفر يمنع فحصه، لذا نحتفظ به
+        if (response.status === 404 || response.status === 410 || response.status === 400) {
+            return ""; 
         }
+        
+        return url; 
     } catch (error) {
-        // إذا حدث خطأ (مثل انتهاء الوقت أو الرابط محجوب)
+        // إذا كان هناك فشل كامل في الاتصال (السيرفر لا يرد أبداً أو انتهى الوقت)
         return "";
     }
 }
@@ -113,12 +112,12 @@ app.get('/api/extract', async (req, res) => {
         // 2. إبقاء أفضل ملف MP3 فقط
         filteredData = keepBestMp3Only(filteredData);
         
-        // 3. فحص جميع الروابط المتبقية في نفس الوقت (لتسريع العملية)
+        // 3. فحص الروابط بشكل متوازي
         const finalDownloads = await Promise.all(filteredData.map(async (item) => {
             const aliveUrl = await checkUrlIsAlive(item.download_url);
             return {
                 ...item,
-                download_url: aliveUrl // سيصبح "" إذا كان الرابط لا يعمل
+                download_url: aliveUrl 
             };
         }));
         
