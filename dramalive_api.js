@@ -184,72 +184,9 @@ app.get("/stream", async (req, res) => {
 
 
 
-
-
-
-
-
-
-
-
-
-
-
-app.get("/live", (req, res) => {
-  const url = req.query.u; // الرابط (يجب أن يكون رابط m3u8 مباشر)
-  
-  if (!url) {
-    return res.status(400).send("يرجى إرسال رابط البث عبر المعامل u");
-  }
-
-  const htmlContent = `
-    <!DOCTYPE html>
-    <html>
-    <head>
-        <title>مشغل البث</title>
-        <script src="https://cdn.jsdelivr.net/npm/hls.js@latest"></script>
-        <style>
-            body { margin:0; background:#000; }
-            #video { width:100%; height:100vh; }
-        </style>
-    </head>
-    <body>
-        <video id="video" controls autoplay></video>
-        <script>
-            var video = document.getElementById('video');
-            var videoSrc = '${url}';
-            if (Hls.isSupported()) {
-                var hls = new Hls();
-                hls.loadSource(videoSrc);
-                hls.attachMedia(video);
-                hls.on(Hls.Events.MANIFEST_PARSED, function() { video.play(); });
-            } else if (video.canPlayType('application/vnd.apple.mpegurl')) {
-                video.src = videoSrc;
-            }
-        </script>
-    </body>
-    </html>
-  `;
-
-  res.send(htmlContent);
-});
-
-
-
-
-
-
-
-
-
-
-// مسار لاختبار الروابط المخفية للأقسام
-app.get("/explore", async (req, res) => {
+// مسار لاختبار الخادم الرئيسي لاستخراج البيانات الأساسية
+app.get("/main-server-test", async (req, res) => {
   try {
-    // يمكنك تمرير اسم الرابط المراد اختباره عبر مسار الرابط
-    // مثال: /explore?endpoint=getLiveCategories
-    const endpointName = req.query.endpoint || "getLiveCategories"; 
-    
     const postData = {
       "user_id": "_19449_1785337989457_notloggedin.com_dramalive3",
       "device_id": "dde6f748-9857-4140-b133-4ccfaeb015fe",
@@ -260,49 +197,46 @@ app.get("/explore", async (req, res) => {
       "device_type": "phone",
       "KEY_ACTIVATED_TYPE": "232425",
       "store": "direct",
-      "isStoreVersion": false,
-      "isPremium": false,
-      "isCoupon_active": false,
-      "hideAds": false,
-      "appCount": "{\"adsFailed\":122,\"adsLoaded\":76,\"adsShowed\":29,\"runCount\":12}",
       "mainServer": "http://main.backendcoreapi.com/api/live/livedrama/v13.0.0/",
       "type": "tv"
-      // لاحظ أننا أزلنا "topic" هنا لنرى إن كان السيرفر سيرد بكل البيانات
+      // لم نضع topic هنا لأننا نريد الإعدادات العامة
     };
-    
+
     const encryptedBody = encryptAES(JSON.stringify(postData));
-    
+
     const response = await axios.post(
-      `http://live.1spbgmu.com/api/live/livedrama/v13.0.0/${endpointName}`,
+      // نجرب مسار جلب الأقسام على الخادم الرئيسي
+      "http://main.backendcoreapi.com/api/live/livedrama/v13.0.0/getCategories", 
       encryptedBody,
       {
         headers: {
           "Content-Type": "text/plain",
           "User-Agent": "Dalvik/2.1.0 (Linux; U; Android 9; SM-S908E Build/TP1A.220624.014)",
-          "Host": "live.1spbgmu.com",
           "Connection": "Keep-Alive"
         },
-        timeout: 10000,
+        timeout: 15000,
         responseType: "arraybuffer" 
       }
     );
-    
+
     const rawBuffer = Buffer.from(response.data);
-    const rawText = rawBuffer.toString("utf-8");
-    const cleanEncryptedText = rawText.trim();
+    const decryptedResponse = decryptAES(rawBuffer.toString("utf-8").trim());
     
-    const decryptedResponse = decryptAES(cleanEncryptedText);
-    
-    try {
-      res.json(JSON.parse(decryptedResponse));
-    } catch (e) {
-      res.send(decryptedResponse);
-    }
-    
+    res.json(JSON.parse(decryptedResponse));
+
   } catch (error) {
-    res.json({ error: true, endpoint_tested: req.query.endpoint, message: "هذا الرابط غير موجود أو السيرفر رفض الطلب" });
+    res.json({ error: true, message: "فشل الاتصال بالمسار، قد يكون اسم الـ Endpoint مختلفاً." });
   }
 });
+
+
+
+
+
+
+
+
+
 
 
 
