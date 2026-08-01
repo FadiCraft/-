@@ -37,6 +37,7 @@ app.get("/", async (req, res) => {
   let logs = [];
   
   try {
+    // نفس البيانات بالضبط اللي اشتغلت معك قبل
     const postData = {
       "user_id": "_19449_1785337989457_notloggedin.com_dramalive3",
       "device_id": "dde6f748-9857-4140-b133-4ccfaeb015fe",
@@ -60,11 +61,8 @@ app.get("/", async (req, res) => {
     const jsonData = JSON.stringify(postData);
     const encryptedBody = encryptAES(jsonData);
     
+    logs.push("طول JSON الأصلي: " + jsonData.length);
     logs.push("طول النص المشفر: " + encryptedBody.length);
-    
-    // استخدام http agent مع keep-alive
-    const http = require("http");
-    const agent = new http.Agent({ keepAlive: true });
     
     const response = await axios.post(
       "http://live.1spbgmu.com/api/live/livedrama/v13.0.0/getLiveByTopic",
@@ -78,23 +76,17 @@ app.get("/", async (req, res) => {
           "Accept-Encoding": "gzip",
           "Content-Length": encryptedBody.length
         },
-        httpAgent: agent,
-        timeout: 30000,
-        maxRedirects: 0,
-        validateStatus: function (status) {
-          return status >= 200 && status < 500;
-        }
+        timeout: 30000
       }
     );
     
     logs.push("Status: " + response.status);
-    logs.push("Headers: " + JSON.stringify(response.headers));
     logs.push("طول الرد: " + response.data.length);
-    logs.push("الرد كامل: " + JSON.stringify(response.data));
+    logs.push("الرد: " + JSON.stringify(response.data));
     
     if (response.data.length < 50) {
       return res.json({
-        error: "رد قصير جداً",
+        error: "رد قصير",
         logs: logs,
         rawResponse: response.data
       });
@@ -105,7 +97,6 @@ app.get("/", async (req, res) => {
     
     res.json({
       success: true,
-      logs: logs,
       data: jsonResponse
     });
     
@@ -116,5 +107,5 @@ app.get("/", async (req, res) => {
 });
 
 app.listen(PORT, () => {
-  console.log("Server ready on port " + PORT);
+  console.log("Server ready");
 });
