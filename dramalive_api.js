@@ -5,7 +5,7 @@ const CryptoJS = require("crypto-js");
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-// الثوابت كما هي
+// الثوابت
 const KEY = CryptoJS.enc.Utf8.parse("0123456789abcdef");
 const IV = CryptoJS.enc.Utf8.parse("fedcba9876543210");
 
@@ -15,8 +15,9 @@ function encryptAES(data) {
     mode: CryptoJS.mode.CBC,
     padding: CryptoJS.pad.Pkcs7
   });
-  const combined = IV.concat(encrypted.ciphertext);
-  return combined.toString(CryptoJS.enc.Base64);
+  
+  // نرجع التنسيق: النص المشفر + نقطتين + IV مشفر بـ Base64
+  return encrypted.toString() + ":" + CryptoJS.enc.Base64.stringify(IV);
 }
 
 app.get("/", async (req, res) => {
@@ -45,10 +46,11 @@ app.get("/", async (req, res) => {
     
     const response = await axios.post(
       "http://live.1spbgmu.com/api/live/livedrama/v13.0.0/getLiveByTopic",
-      encryptedBody,
+      encryptedBody, // هنا البيانات المشفرة
       {
         headers: {
-          "Content-Type": "text/plain",
+          // الحل هنا: text/plain لأن البيانات مشفرة وليست JSON
+          "Content-Type": "text/plain", 
           "User-Agent": "Dalvik/2.1.0 (Linux; U; Android 9; SM-S908E Build/TP1A.220624.014)",
           "Host": "live.1spbgmu.com",
           "Connection": "Keep-Alive",
@@ -58,19 +60,14 @@ app.get("/", async (req, res) => {
       }
     );
     
-    // الحل النهائي للتشخيص: أرسل لنا الرد كما هو بالضبط
+    // إرجاع الرد كما هو (السيرفر غالباً يرسل الرد مشفراً أيضاً)
     res.json({
       status: response.status,
-      rawData: response.data,
-      dataType: typeof response.data
+      rawData: response.data
     });
     
   } catch (error) {
-    res.json({ 
-        error: true, 
-        message: error.message,
-        response: error.response ? error.response.data : "لا يوجد رد"
-    });
+    res.json({ error: true, message: error.message });
   }
 });
 
