@@ -83,12 +83,16 @@ app.get("/", async (req, res) => {
   }
 });
 
+
+
+
+
+// مسار البث (بدون فك تشفير، يرجع النص الخام)
 app.get("/stream", async (req, res) => {
   try {
     const id_live = req.query.id_live;
     if (!id_live) return res.json({ error: true, message: "يرجى إدخال id_live" });
 
-    // يجب أن تكون البيانات كاملة كما في الطلب الأول بالضبط + إضافة id_live
     const postData = {
       "user_id": "_19449_1785337989457_notloggedin.com_dramalive3",
       "device_id": "dde6f748-9857-4140-b133-4ccfaeb015fe",
@@ -106,14 +110,12 @@ app.get("/stream", async (req, res) => {
       "appCount": "{\"adsFailed\":122,\"adsLoaded\":76,\"adsShowed\":29,\"runCount\":12}",
       "mainServer": "http://main.backendcoreapi.com/api/live/livedrama/v13.0.0/",
       "type": "tv",
-      "id_live": id_live, // هنا الإضافة
-      "topic": "arabic_sport" // تأكد من إضافة الحقول الضرورية التي يتوقعها السيرفر
+      "id_live": id_live
     };
     
-    // تشفير كامل البيانات
     const encryptedBody = encryptAES(JSON.stringify(postData));
     
-    // إرسال الطلب للرابط الجديد
+    // تصحيح الرابط هنا:
     const response = await axios.post(
       "http://redirect.1spbgmu.com/api/redirect/getLiveByDoubleRedirect",
       encryptedBody,
@@ -129,9 +131,8 @@ app.get("/stream", async (req, res) => {
       }
     );
     
-    // فك التشفير
-    const decryptedResponse = decryptAES(response.data);
-    res.json(JSON.parse(decryptedResponse));
+    // إرجاع النص المشفر كما هو
+    res.send(response.data);
     
   } catch (error) {
     res.json({ error: true, message: error.message });
