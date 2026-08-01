@@ -33,7 +33,7 @@ function decryptAES(encryptedText) {
   return decrypted.toString(CryptoJS.enc.Utf8);
 }
 
-// الصفحة الرئيسية - ترجع كل القنوات
+// الصفحة الرئيسية
 app.get("/", async (req, res) => {
   try {
     const postData = {
@@ -83,8 +83,10 @@ app.get("/", async (req, res) => {
   }
 });
 
-// مسار استخراج رابط البث - يستخدم getLiveAllStreamsById
+// مسار البث مع تتبع
 app.get("/stream", async (req, res) => {
+  let log = [];
+  
   try {
     const id_live = req.query.id_live;
     
@@ -112,7 +114,10 @@ app.get("/stream", async (req, res) => {
       "id_live": id_live
     };
     
+    log.push("1. تم تجهيز البيانات");
+    
     const encryptedBody = encryptAES(JSON.stringify(postData));
+    log.push("2. تم تشفير البيانات، الطول: " + encryptedBody.length);
     
     const response = await axios.post(
       "http://live.1spbgmu.com/api/live/livedrama/v13.0.0/getLiveAllStreamsById",
@@ -129,14 +134,36 @@ app.get("/stream", async (req, res) => {
       }
     );
     
-    // فك تشفير الرد
-    const decryptedResponse = decryptAES(response.data);
-    const jsonResponse = JSON.parse(decryptedResponse);
+    log.push("3. Status: " + response.status);
+    log.push("4. طول الرد: " + response.data.length);
+    log.push("5. أول 100 حرف: " + response.data.substring(0, 100));
     
-    res.json(jsonResponse);
+    // فك التشفير
+    const decryptedResponse = decryptAES(response.data);
+    log.push("6. تم فك التشفير");
+    log.push("7. النص المفكوك: " + decryptedResponse.substring(0, 200));
+    
+    // محاولة تحويل إلى JSON
+    try {
+      const jsonResponse = JSON.parse(decryptedResponse);
+      log.push("8. تم تحويل إلى JSON");
+      res.json(jsonResponse);
+    } catch (parseError) {
+      log.push("8. فشل تحويل JSON: " + parseError.message);
+      res.json({
+        error: true,
+        message: "الرد مش JSON صالح",
+        log: log,
+        rawDecrypted: decryptedResponse
+      });
+    }
     
   } catch (error) {
-    res.json({ error: true, message: error.message });
+    res.json({ 
+      error: true, 
+      message: error.message,
+      log: log
+    });
   }
 });
 
