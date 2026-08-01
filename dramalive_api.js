@@ -89,7 +89,6 @@ app.get("/", async (req, res) => {
 
 
 
-// مسار البث - مع محاكاة دقيقة واستلام البيانات الخام (Bytes)
 app.get("/stream", async (req, res) => {
   try {
     const id_live = req.query.id_live;
@@ -115,7 +114,12 @@ app.get("/stream", async (req, res) => {
       "appCount": "{\"adsFailed\":122,\"adsLoaded\":76,\"adsShowed\":29,\"runCount\":12}",
       "mainServer": "http://main.backendcoreapi.com/api/live/livedrama/v13.0.0/",
       "type": "tv",
-      "id_live": id_live
+      
+      // هنا سنقوم بإرسال كل الاحتمالات الممكنة لاسم المتغير لتجنب رفض السيرفر
+      "id_live": id_live,
+      "id": id_live,
+      "live_id": id_live,
+      "channel_id": id_live
     };
     
     const encryptedBody = encryptAES(JSON.stringify(postData));
@@ -129,29 +133,29 @@ app.get("/stream", async (req, res) => {
           "User-Agent": "Dalvik/2.1.0 (Linux; U; Android 9; SM-S908E Build/TP1A.220624.014)",
           "Host": "live.1spbgmu.com",
           "Connection": "Keep-Alive"
-          // تم إزالة Accept-Encoding يدوياً لترك Axios يتعامل مع فك الضغط بأمان
         },
         timeout: 30000,
-        // هذه الخطوة الأهم: استلام البيانات كبايتات خام لضمان عدم ضياع النص بسبب التشفير
         responseType: "arraybuffer" 
       }
     );
     
-    // تحويل البايتات الخام إلى نص بشكل آمن، ثم تنظيف الفراغات
-    const rawText = Buffer.from(response.data).toString("utf-8");
+    const rawBuffer = Buffer.from(response.data);
+    const rawText = rawBuffer.toString("utf-8");
     const cleanEncryptedText = rawText.trim();
     
-    // في حال كان السيرفر لا يزال يرد بفراغ، سنطبع معلومات تفصيلية لمعرفة السبب
-    if (!cleanEncryptedText) {
+    // إذا كان الرد أقصر من 50 بايت، فهذا يعني أنه خطأ وليس نصاً مشفراً
+    if (rawBuffer.length < 50) {
       return res.json({
         error: true,
-        message: "السيرفر أرجع رداً فارغاً",
-        status: response.status,
-        headers: response.headers
+        message: "السيرفر رفض الطلب وأرجع رداً قصيراً",
+        length: rawBuffer.length,
+        raw_text: rawText, // النص كما هو
+        hex: rawBuffer.toString("hex"), // تحويله لهيكس لكشف أي رموز مخفية
+        status: response.status
       });
     }
     
-    // إرجاع النص المشفر الصافي
+    // إرجاع النص المشفر الصافي إذا نجح الطلب
     res.type("text/plain").send(cleanEncryptedText);
     
   } catch (error) {
@@ -162,7 +166,6 @@ app.get("/stream", async (req, res) => {
     });
   }
 });
-
 
 app.listen(PORT, () => {
   console.log("Server ready on port " + PORT);
