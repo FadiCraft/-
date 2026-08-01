@@ -18,22 +18,7 @@ function encryptAES(data) {
   return encrypted.toString() + ":" + CryptoJS.enc.Base64.stringify(IV);
 }
 
-function decryptAES(encryptedText) {
-  encryptedText = encryptedText.trim();
-  const lastColon = encryptedText.lastIndexOf(":");
-  const encryptedData = encryptedText.substring(0, lastColon);
-  const ivBase64 = encryptedText.substring(lastColon + 1);
-  
-  const decrypted = CryptoJS.AES.decrypt(encryptedData, KEY, {
-    iv: CryptoJS.enc.Base64.parse(ivBase64),
-    mode: CryptoJS.mode.CBC,
-    padding: CryptoJS.pad.Pkcs7
-  });
-  
-  return decrypted.toString(CryptoJS.enc.Utf8);
-}
-
-// الصفحة الرئيسية
+// الصفحة الرئيسية - ترجع كل القنوات
 app.get("/", async (req, res) => {
   try {
     const postData = {
@@ -63,7 +48,7 @@ app.get("/", async (req, res) => {
       encryptedBody,
       {
         headers: {
-          "Content-Type": "text/plain",
+          "Content-Type": "application/json; charset=utf-8",
           "User-Agent": "Dalvik/2.1.0 (Linux; U; Android 9; SM-S908E Build/TP1A.220624.014)",
           "Host": "live.1spbgmu.com",
           "Connection": "Keep-Alive",
@@ -73,26 +58,23 @@ app.get("/", async (req, res) => {
       }
     );
     
-    const decryptedResponse = decryptAES(response.data);
-    const jsonResponse = JSON.parse(decryptedResponse);
-    
-    res.json(jsonResponse);
+    // إرجاع النص المشفر كما هو
+    res.type("text/plain").send(response.data);
     
   } catch (error) {
     res.json({ error: true, message: error.message });
   }
 });
 
-
-
-
-
-// مسار البث (بدون فك تشفير، يرجع النص الخام)
+// مسار البث - يرجع النص المشفر كما هو
 app.get("/stream", async (req, res) => {
   try {
     const id_live = req.query.id_live;
-    if (!id_live) return res.json({ error: true, message: "يرجى إدخال id_live" });
-
+    
+    if (!id_live) {
+      return res.json({ error: true, message: "يرجى إدخال id_live" });
+    }
+    
     const postData = {
       "user_id": "_19449_1785337989457_notloggedin.com_dramalive3",
       "device_id": "dde6f748-9857-4140-b133-4ccfaeb015fe",
@@ -115,15 +97,14 @@ app.get("/stream", async (req, res) => {
     
     const encryptedBody = encryptAES(JSON.stringify(postData));
     
-    // تصحيح الرابط هنا:
     const response = await axios.post(
-      "http://redirect.1spbgmu.com/api/redirect/getLiveByDoubleRedirect",
+      "http://live.1spbgmu.com/api/live/livedrama/v13.0.0/getLiveAllStreamsById",
       encryptedBody,
       {
         headers: {
-          "Content-Type": "text/plain",
+          "Content-Type": "application/json; charset=utf-8",
           "User-Agent": "Dalvik/2.1.0 (Linux; U; Android 9; SM-S908E Build/TP1A.220624.014)",
-          "Host": "redirect.1spbgmu.com",
+          "Host": "live.1spbgmu.com",
           "Connection": "Keep-Alive",
           "Accept-Encoding": "gzip"
         },
@@ -132,7 +113,7 @@ app.get("/stream", async (req, res) => {
     );
     
     // إرجاع النص المشفر كما هو
-    res.send(response.data);
+    res.type("text/plain").send(response.data);
     
   } catch (error) {
     res.json({ error: true, message: error.message });
