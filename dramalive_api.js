@@ -5,7 +5,6 @@ const CryptoJS = require("crypto-js");
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-// الثوابت
 const KEY = CryptoJS.enc.Utf8.parse("0123456789abcdef");
 const IV = CryptoJS.enc.Utf8.parse("fedcba9876543210");
 
@@ -16,8 +15,26 @@ function encryptAES(data) {
     padding: CryptoJS.pad.Pkcs7
   });
   
-  // نرجع التنسيق: النص المشفر + نقطتين + IV مشفر بـ Base64
   return encrypted.toString() + ":" + CryptoJS.enc.Base64.stringify(IV);
+}
+
+function decryptAES(encryptedText) {
+  // تنظيف النص من المسافات الزائدة
+  encryptedText = encryptedText.trim();
+  
+  // البحث عن آخر ":" لفصل الـ IV
+  const lastColon = encryptedText.lastIndexOf(":");
+  const encryptedData = encryptedText.substring(0, lastColon);
+  const ivBase64 = encryptedText.substring(lastColon + 1);
+  
+  // فك التشفير
+  const decrypted = CryptoJS.AES.decrypt(encryptedData, KEY, {
+    iv: CryptoJS.enc.Base64.parse(ivBase64),
+    mode: CryptoJS.mode.CBC,
+    padding: CryptoJS.pad.Pkcs7
+  });
+  
+  return decrypted.toString(CryptoJS.enc.Utf8);
 }
 
 app.get("/", async (req, res) => {
@@ -42,15 +59,16 @@ app.get("/", async (req, res) => {
       "topic": "arabic_sport"
     };
     
+    // تشفير البيانات
     const encryptedBody = encryptAES(JSON.stringify(postData));
     
+    // إرسال الطلب
     const response = await axios.post(
       "http://live.1spbgmu.com/api/live/livedrama/v13.0.0/getLiveByTopic",
-      encryptedBody, // هنا البيانات المشفرة
+      encryptedBody,
       {
         headers: {
-          // الحل هنا: text/plain لأن البيانات مشفرة وليست JSON
-          "Content-Type": "text/plain", 
+          "Content-Type": "text/plain",
           "User-Agent": "Dalvik/2.1.0 (Linux; U; Android 9; SM-S908E Build/TP1A.220624.014)",
           "Host": "live.1spbgmu.com",
           "Connection": "Keep-Alive",
@@ -60,11 +78,12 @@ app.get("/", async (req, res) => {
       }
     );
     
-    // إرجاع الرد كما هو (السيرفر غالباً يرسل الرد مشفراً أيضاً)
-    res.json({
-      status: response.status,
-      rawData: response.data
-    });
+    // فك تشفير الرد
+    const decryptedResponse = decryptAES(response.data);
+    const jsonResponse = JSON.parse(decryptedResponse);
+    
+    // عرض JSON النهائي
+    res.json(jsonResponse);
     
   } catch (error) {
     res.json({ error: true, message: error.message });
