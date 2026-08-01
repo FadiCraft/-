@@ -67,7 +67,10 @@ app.get("/", async (req, res) => {
           "User-Agent": "Dalvik/2.1.0 (Linux; U; Android 9; SM-S908E Build/TP1A.220624.014)",
           "Host": "live.1spbgmu.com",
           "Connection": "Keep-Alive",
-          "Accept-Encoding": "gzip"
+          "Accept-Encoding": "gzip",
+          "Accept": "*/*",
+          "Accept-Language": "ar",
+          "X-Requested-With": "XMLHttpRequest"
         },
         timeout: 30000
       }
@@ -83,7 +86,7 @@ app.get("/", async (req, res) => {
   }
 });
 
-// مسار البث - يرجع النص المشفر كما هو بدون فك
+// مسار البث - مع محاكاة كاملة
 app.get("/stream", async (req, res) => {
   try {
     const id_live = req.query.id_live;
@@ -123,7 +126,10 @@ app.get("/stream", async (req, res) => {
           "User-Agent": "Dalvik/2.1.0 (Linux; U; Android 9; SM-S908E Build/TP1A.220624.014)",
           "Host": "live.1spbgmu.com",
           "Connection": "Keep-Alive",
-          "Accept-Encoding": "gzip"
+          "Accept-Encoding": "gzip",
+          "Accept": "*/*",
+          "Accept-Language": "ar",
+          "X-Requested-With": "XMLHttpRequest"
         },
         timeout: 30000
       }
