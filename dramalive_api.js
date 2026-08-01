@@ -8,6 +8,16 @@ const PORT = process.env.PORT || 3000;
 const KEY = CryptoJS.enc.Utf8.parse("0123456789abcdef");
 const IV = CryptoJS.enc.Utf8.parse("fedcba9876543210");
 
+function encryptAES(data) {
+  const encrypted = CryptoJS.AES.encrypt(data, KEY, {
+    iv: IV,
+    mode: CryptoJS.mode.CBC,
+    padding: CryptoJS.pad.Pkcs7
+  });
+  
+  return encrypted.toString() + ":" + CryptoJS.enc.Base64.stringify(IV);
+}
+
 function decryptAES(encryptedText) {
   encryptedText = encryptedText.trim();
   const lastColon = encryptedText.lastIndexOf(":");
@@ -23,22 +33,10 @@ function decryptAES(encryptedText) {
   return decrypted.toString(CryptoJS.enc.Utf8);
 }
 
-function encryptAES(data) {
-  const encrypted = CryptoJS.AES.encrypt(data, KEY, {
-    iv: IV,
-    mode: CryptoJS.mode.CBC,
-    padding: CryptoJS.pad.Pkcs7
-  });
-  
-  return encrypted.toString() + ":" + CryptoJS.enc.Base64.stringify(IV);
-}
-
 app.get("/", async (req, res) => {
-  // مصفوفة لجمع السجلات
   let logs = [];
   
   try {
-    // الخطوة 1: تجهيز البيانات
     const postData = {
       "user_id": "_19449_1785337989457_notloggedin.com_dramalive3",
       "device_id": "dde6f748-9857-4140-b133-4ccfaeb015fe",
@@ -53,24 +51,20 @@ app.get("/", async (req, res) => {
       "isPremium": false,
       "isCoupon_active": false,
       "hideAds": false,
-      "appCount": "{}",
+      "appCount": "{\"adsFailed\":122,\"adsLoaded\":76,\"adsShowed\":29,\"runCount\":12}",
       "mainServer": "http://main.backendcoreapi.com/api/live/livedrama/v13.0.0/",
       "type": "tv",
       "topic": "arabic_sport"
     };
     
-    logs.push("✅ 1. تجهيز البيانات");
-    
-    // الخطوة 2: تشفير البيانات
     const jsonData = JSON.stringify(postData);
-    logs.push("✅ 2. تحويل البيانات إلى JSON");
-    
     const encryptedBody = encryptAES(jsonData);
-    logs.push("✅ 3. تشفير البيانات");
-    logs.push("📝 البيانات المشفرة (أول 100 حرف): " + encryptedBody.substring(0, 100));
     
-    // الخطوة 3: إرسال الطلب
-    logs.push("✅ 4. إرسال الطلب إلى السيرفر...");
+    logs.push("طول النص المشفر: " + encryptedBody.length);
+    
+    // استخدام http agent مع keep-alive
+    const http = require("http");
+    const agent = new http.Agent({ keepAlive: true });
     
     const response = await axios.post(
       "http://live.1spbgmu.com/api/live/livedrama/v13.0.0/getLiveByTopic",
@@ -81,37 +75,33 @@ app.get("/", async (req, res) => {
           "User-Agent": "Dalvik/2.1.0 (Linux; U; Android 9; SM-S908E Build/TP1A.220624.014)",
           "Host": "live.1spbgmu.com",
           "Connection": "Keep-Alive",
-          "Accept-Encoding": "gzip"
+          "Accept-Encoding": "gzip",
+          "Content-Length": encryptedBody.length
         },
-        timeout: 30000
+        httpAgent: agent,
+        timeout: 30000,
+        maxRedirects: 0,
+        validateStatus: function (status) {
+          return status >= 200 && status < 500;
+        }
       }
     );
     
-    logs.push("✅ 5. تم استلام الرد");
-    logs.push("📝 Status: " + response.status);
-    logs.push("📝 الرد الخام (أول 200 حرف): " + response.data.substring(0, 200));
-    logs.push("📝 نوع الرد: " + typeof response.data);
-    logs.push("📝 طول الرد: " + response.data.length);
+    logs.push("Status: " + response.status);
+    logs.push("Headers: " + JSON.stringify(response.headers));
+    logs.push("طول الرد: " + response.data.length);
+    logs.push("الرد كامل: " + JSON.stringify(response.data));
     
-    // التحقق إذا كان الرد HTML
-    if (response.data.includes("<html") || response.data.includes("<!DOCTYPE")) {
-      logs.push("❌ الرد HTML وليس نص مشفر!");
+    if (response.data.length < 50) {
       return res.json({
-        error: "HTML Response",
+        error: "رد قصير جداً",
         logs: logs,
-        htmlPreview: response.data.substring(0, 500)
+        rawResponse: response.data
       });
     }
     
-    // الخطوة 4: فك التشفير
-    logs.push("✅ 6. فك التشفير...");
     const decryptedResponse = decryptAES(response.data);
-    logs.push("✅ 7. تم فك التشفير");
-    logs.push("📝 النص المفكوك (أول 200 حرف): " + decryptedResponse.substring(0, 200));
-    
-    // الخطوة 5: تحويل إلى JSON
     const jsonResponse = JSON.parse(decryptedResponse);
-    logs.push("✅ 8. تم تحويل إلى JSON");
     
     res.json({
       success: true,
@@ -120,19 +110,8 @@ app.get("/", async (req, res) => {
     });
     
   } catch (error) {
-    logs.push("❌ خطأ: " + error.message);
-    logs.push("❌ نوع الخطأ: " + error.name);
-    
-    if (error.response) {
-      logs.push("📝 خطأ في الرد - Status: " + error.response.status);
-      logs.push("📝 رد الخطأ: " + JSON.stringify(error.response.data).substring(0, 200));
-    }
-    
-    res.json({ 
-      error: "Failed",
-      message: error.message,
-      logs: logs
-    });
+    logs.push("Error: " + error.message);
+    res.json({ error: true, logs: logs });
   }
 });
 
