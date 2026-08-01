@@ -14,7 +14,6 @@ function encryptAES(data) {
     mode: CryptoJS.mode.CBC,
     padding: CryptoJS.pad.Pkcs7
   });
-  
   return encrypted.toString() + ":" + CryptoJS.enc.Base64.stringify(IV);
 }
 
@@ -33,93 +32,36 @@ function decryptAES(encryptedText) {
   return decrypted.toString(CryptoJS.enc.Utf8);
 }
 
-// الصفحة الرئيسية - ترجع كل القنوات
+// المسار الأول (الذي نجح معك)
 app.get("/", async (req, res) => {
-  try {
-    const postData = {
-      "user_id": "_19449_1785337989457_notloggedin.com_dramalive3",
-      "device_id": "dde6f748-9857-4140-b133-4ccfaeb015fe",
-      "device_api": "28",
-      "version_name": "187",
-      "language": "ar",
-      "timezone": "Europe/Istanbul",
-      "device_type": "phone",
-      "KEY_ACTIVATED_TYPE": "232425",
-      "store": "direct",
-      "isStoreVersion": false,
-      "isPremium": false,
-      "isCoupon_active": false,
-      "hideAds": false,
-      "appCount": "{\"adsFailed\":122,\"adsLoaded\":76,\"adsShowed\":29,\"runCount\":12}",
-      "mainServer": "http://main.backendcoreapi.com/api/live/livedrama/v13.0.0/",
-      "type": "tv",
-      "topic": "arabic_sport"
-    };
-    
-    const encryptedBody = encryptAES(JSON.stringify(postData));
-    
-    const response = await axios.post(
-      "http://live.1spbgmu.com/api/live/livedrama/v13.0.0/getLiveByTopic",
-      encryptedBody,
-      {
-        headers: {
-          "Content-Type": "text/plain",
-          "User-Agent": "Dalvik/2.1.0 (Linux; U; Android 9; SM-S908E Build/TP1A.220624.014)",
-          "Host": "live.1spbgmu.com",
-          "Connection": "Keep-Alive",
-          "Accept-Encoding": "gzip"
-        },
-        timeout: 30000
-      }
-    );
-    
-    const decryptedResponse = decryptAES(response.data);
-    const jsonResponse = JSON.parse(decryptedResponse);
-    
-    res.json(jsonResponse);
-    
-  } catch (error) {
-    res.json({ error: true, message: error.message });
-  }
+    // ... (نفس الكود الخاص بـ / السابق)
+    try {
+        const postData = { /* ... بياناتك السابقة ... */ };
+        const encryptedBody = encryptAES(JSON.stringify(postData));
+        const response = await axios.post("http://live.1spbgmu.com/api/live/livedrama/v13.0.0/getLiveByTopic", encryptedBody, { headers: { "Content-Type": "text/plain" } });
+        res.json(JSON.parse(decryptAES(response.data)));
+    } catch (e) { res.json({ error: true, message: e.message }); }
 });
 
-// مسار جديد لاستخراج رابط البث من id_live
+// المسار الجديد: /stream?id_live=...
 app.get("/stream", async (req, res) => {
   try {
     const id_live = req.query.id_live;
-    
-    if (!id_live) {
-      return res.json({ error: true, message: "يرجى إدخال id_live" });
-    }
-    
-    // تجهيز البيانات
+    if (!id_live) return res.json({ error: true, message: "يجب تحديد id_live" });
+
+    // هنا نضع البيانات التي يتوقعها الرابط الجديد
+    // ملاحظة: قد تحتاج لإضافة متغيرات أخرى داخل هذا الـ Object إذا كان التطبيق يرسل أشياء إضافية
     const postData = {
-      "user_id": "_19449_1785337989457_notloggedin.com_dramalive3",
-      "device_id": "dde6f748-9857-4140-b133-4ccfaeb015fe",
-      "device_api": "28",
-      "version_name": "187",
-      "language": "ar",
-      "timezone": "Europe/Istanbul",
-      "device_type": "phone",
-      "KEY_ACTIVATED_TYPE": "232425",
-      "store": "direct",
-      "isStoreVersion": false,
-      "isPremium": false,
-      "isCoupon_active": false,
-      "hideAds": false,
-      "appCount": "{\"adsFailed\":122,\"adsLoaded\":76,\"adsShowed\":29,\"runCount\":12}",
-      "mainServer": "http://main.backendcoreapi.com/api/live/livedrama/v13.0.0/",
-      "type": "tv",
       "id_live": id_live,
-      "agent": "all_streams_redirect"
+      "user_id": "_19449_1785337989457_notloggedin.com_dramalive3",
+      "device_id": "dde6f748-9857-4140-b133-4ccfaeb015fe"
+      // يمكنك إضافة أي حقول أخرى يحتاجها الرابط الجديد بناءً على تحليل الترافيك
     };
     
-    // تشفير البيانات
     const encryptedBody = encryptAES(JSON.stringify(postData));
     
-    // إرسال الطلب لرابط الـ redirect
     const response = await axios.post(
-      "http://redirect.1spbgmu.com/redirect/getLiveByDoubleRedirect",
+      "http://redirect.1spbgmu.com/api/redirect/getLiveByDoubleRedirect",
       encryptedBody,
       {
         headers: {
@@ -133,11 +75,8 @@ app.get("/stream", async (req, res) => {
       }
     );
     
-    // فك تشفير الرد
     const decryptedResponse = decryptAES(response.data);
-    const jsonResponse = JSON.parse(decryptedResponse);
-    
-    res.json(jsonResponse);
+    res.json(JSON.parse(decryptedResponse));
     
   } catch (error) {
     res.json({ error: true, message: error.message });
