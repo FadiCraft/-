@@ -19,15 +19,11 @@ function encryptAES(data) {
 }
 
 function decryptAES(encryptedText) {
-  // تنظيف النص من المسافات الزائدة
   encryptedText = encryptedText.trim();
-  
-  // البحث عن آخر ":" لفصل الـ IV
   const lastColon = encryptedText.lastIndexOf(":");
   const encryptedData = encryptedText.substring(0, lastColon);
   const ivBase64 = encryptedText.substring(lastColon + 1);
   
-  // فك التشفير
   const decrypted = CryptoJS.AES.decrypt(encryptedData, KEY, {
     iv: CryptoJS.enc.Base64.parse(ivBase64),
     mode: CryptoJS.mode.CBC,
@@ -37,6 +33,7 @@ function decryptAES(encryptedText) {
   return decrypted.toString(CryptoJS.enc.Utf8);
 }
 
+// الصفحة الرئيسية - ترجع كل القنوات
 app.get("/", async (req, res) => {
   try {
     const postData = {
@@ -59,10 +56,8 @@ app.get("/", async (req, res) => {
       "topic": "arabic_sport"
     };
     
-    // تشفير البيانات
     const encryptedBody = encryptAES(JSON.stringify(postData));
     
-    // إرسال الطلب
     const response = await axios.post(
       "http://live.1spbgmu.com/api/live/livedrama/v13.0.0/getLiveByTopic",
       encryptedBody,
@@ -78,11 +73,70 @@ app.get("/", async (req, res) => {
       }
     );
     
+    const decryptedResponse = decryptAES(response.data);
+    const jsonResponse = JSON.parse(decryptedResponse);
+    
+    res.json(jsonResponse);
+    
+  } catch (error) {
+    res.json({ error: true, message: error.message });
+  }
+});
+
+// مسار جديد لاستخراج رابط البث من id_live
+app.get("/stream", async (req, res) => {
+  try {
+    const id_live = req.query.id_live;
+    
+    if (!id_live) {
+      return res.json({ error: true, message: "يرجى إدخال id_live" });
+    }
+    
+    // تجهيز البيانات
+    const postData = {
+      "user_id": "_19449_1785337989457_notloggedin.com_dramalive3",
+      "device_id": "dde6f748-9857-4140-b133-4ccfaeb015fe",
+      "device_api": "28",
+      "version_name": "187",
+      "language": "ar",
+      "timezone": "Europe/Istanbul",
+      "device_type": "phone",
+      "KEY_ACTIVATED_TYPE": "232425",
+      "store": "direct",
+      "isStoreVersion": false,
+      "isPremium": false,
+      "isCoupon_active": false,
+      "hideAds": false,
+      "appCount": "{\"adsFailed\":122,\"adsLoaded\":76,\"adsShowed\":29,\"runCount\":12}",
+      "mainServer": "http://main.backendcoreapi.com/api/live/livedrama/v13.0.0/",
+      "type": "tv",
+      "id_live": id_live,
+      "agent": "all_streams_redirect"
+    };
+    
+    // تشفير البيانات
+    const encryptedBody = encryptAES(JSON.stringify(postData));
+    
+    // إرسال الطلب لرابط الـ redirect
+    const response = await axios.post(
+      "http://redirect.1spbgmu.com/redirect/getLiveByDoubleRedirect",
+      encryptedBody,
+      {
+        headers: {
+          "Content-Type": "text/plain",
+          "User-Agent": "Dalvik/2.1.0 (Linux; U; Android 9; SM-S908E Build/TP1A.220624.014)",
+          "Host": "redirect.1spbgmu.com",
+          "Connection": "Keep-Alive",
+          "Accept-Encoding": "gzip"
+        },
+        timeout: 30000
+      }
+    );
+    
     // فك تشفير الرد
     const decryptedResponse = decryptAES(response.data);
     const jsonResponse = JSON.parse(decryptedResponse);
     
-    // عرض JSON النهائي
     res.json(jsonResponse);
     
   } catch (error) {
