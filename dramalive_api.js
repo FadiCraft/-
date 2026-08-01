@@ -83,7 +83,7 @@ app.get("/", async (req, res) => {
   }
 });
 
-// مسار استخراج رابط البث من id_live
+// مسار استخراج رابط البث
 app.get("/stream", async (req, res) => {
   try {
     const id_live = req.query.id_live;
@@ -92,6 +92,7 @@ app.get("/stream", async (req, res) => {
       return res.json({ error: true, message: "يرجى إدخال id_live" });
     }
     
+    // تجهيز البيانات
     const postData = {
       "user_id": "_19449_1785337989457_notloggedin.com_dramalive3",
       "device_id": "dde6f748-9857-4140-b133-4ccfaeb015fe",
@@ -113,8 +114,10 @@ app.get("/stream", async (req, res) => {
       "agent": "all_streams_redirect"
     };
     
+    // تشفير البيانات
     const encryptedBody = encryptAES(JSON.stringify(postData));
     
+    // إرسال الطلب
     const response = await axios.post(
       "http://redirect.1spbgmu.com/redirect/getLiveByDoubleRedirect",
       encryptedBody,
@@ -130,9 +133,11 @@ app.get("/stream", async (req, res) => {
       }
     );
     
+    // فك تشفير الرد
     const decryptedResponse = decryptAES(response.data);
     const jsonResponse = JSON.parse(decryptedResponse);
     
+    // إرجاع النتيجة مباشرة
     res.json(jsonResponse);
     
   } catch (error) {
