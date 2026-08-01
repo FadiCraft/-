@@ -240,6 +240,73 @@ app.get("/live", (req, res) => {
 
 
 
+
+
+
+// مسار لاختبار الروابط المخفية للأقسام
+app.get("/explore", async (req, res) => {
+  try {
+    // يمكنك تمرير اسم الرابط المراد اختباره عبر مسار الرابط
+    // مثال: /explore?endpoint=getLiveCategories
+    const endpointName = req.query.endpoint || "getLiveCategories"; 
+    
+    const postData = {
+      "user_id": "_19449_1785337989457_notloggedin.com_dramalive3",
+      "device_id": "dde6f748-9857-4140-b133-4ccfaeb015fe",
+      "device_api": "28",
+      "version_name": "187",
+      "language": "ar",
+      "timezone": "Europe/Istanbul",
+      "device_type": "phone",
+      "KEY_ACTIVATED_TYPE": "232425",
+      "store": "direct",
+      "isStoreVersion": false,
+      "isPremium": false,
+      "isCoupon_active": false,
+      "hideAds": false,
+      "appCount": "{\"adsFailed\":122,\"adsLoaded\":76,\"adsShowed\":29,\"runCount\":12}",
+      "mainServer": "http://main.backendcoreapi.com/api/live/livedrama/v13.0.0/",
+      "type": "tv"
+      // لاحظ أننا أزلنا "topic" هنا لنرى إن كان السيرفر سيرد بكل البيانات
+    };
+    
+    const encryptedBody = encryptAES(JSON.stringify(postData));
+    
+    const response = await axios.post(
+      `http://live.1spbgmu.com/api/live/livedrama/v13.0.0/${endpointName}`,
+      encryptedBody,
+      {
+        headers: {
+          "Content-Type": "text/plain",
+          "User-Agent": "Dalvik/2.1.0 (Linux; U; Android 9; SM-S908E Build/TP1A.220624.014)",
+          "Host": "live.1spbgmu.com",
+          "Connection": "Keep-Alive"
+        },
+        timeout: 10000,
+        responseType: "arraybuffer" 
+      }
+    );
+    
+    const rawBuffer = Buffer.from(response.data);
+    const rawText = rawBuffer.toString("utf-8");
+    const cleanEncryptedText = rawText.trim();
+    
+    const decryptedResponse = decryptAES(cleanEncryptedText);
+    
+    try {
+      res.json(JSON.parse(decryptedResponse));
+    } catch (e) {
+      res.send(decryptedResponse);
+    }
+    
+  } catch (error) {
+    res.json({ error: true, endpoint_tested: req.query.endpoint, message: "هذا الرابط غير موجود أو السيرفر رفض الطلب" });
+  }
+});
+
+
+
+
 app.listen(PORT, () => {
   console.log("Server ready on port " + PORT);
 });
