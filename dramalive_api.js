@@ -195,41 +195,44 @@ app.get("/stream", async (req, res) => {
 
 
 
-
-// مسار المشاهدة المباشرة عبر Iframe
 app.get("/live", (req, res) => {
-  const url = req.query.u; // الرابط الذي ستمرره عبر ?u=
+  const url = req.query.u; // الرابط (يجب أن يكون رابط m3u8 مباشر)
   
   if (!url) {
     return res.status(400).send("يرجى إرسال رابط البث عبر المعامل u");
   }
 
-  // كود HTML بسيط لعرض الفيديو
   const htmlContent = `
     <!DOCTYPE html>
-    <html lang="ar">
+    <html>
     <head>
-        <meta charset="UTF-8">
-        <meta name="viewport" content="width=device-width, initial-scale=1.0">
-        <title>مشغل البث المباشر</title>
+        <title>مشغل البث</title>
+        <script src="https://cdn.jsdelivr.net/npm/hls.js@latest"></script>
         <style>
-            body, html { margin:0; padding:0; height:100%; overflow:hidden; background:#000; }
-            iframe { position:absolute; top:0; left:0; width:100%; height:100%; border:none; }
+            body { margin:0; background:#000; }
+            #video { width:100%; height:100vh; }
         </style>
     </head>
     <body>
-        <iframe 
-            src="${url}" 
-            allowfullscreen 
-            allow="autoplay; encrypted-media">
-        </iframe>
+        <video id="video" controls autoplay></video>
+        <script>
+            var video = document.getElementById('video');
+            var videoSrc = '${url}';
+            if (Hls.isSupported()) {
+                var hls = new Hls();
+                hls.loadSource(videoSrc);
+                hls.attachMedia(video);
+                hls.on(Hls.Events.MANIFEST_PARSED, function() { video.play(); });
+            } else if (video.canPlayType('application/vnd.apple.mpegurl')) {
+                video.src = videoSrc;
+            }
+        </script>
     </body>
     </html>
   `;
 
   res.send(htmlContent);
 });
-
 
 
 
