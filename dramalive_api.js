@@ -136,6 +136,48 @@ app.get("/stream", async (req, res) => {
     }
 });
 
+
+
+// قائمة الأقسام الكاملة (ضعها في بداية الملف)
+const allTopics = [
+    {"id_topic":"hot_now","name_topic":"الأكثر مشاهدة"},
+    {"id_topic":"live_matches","name_topic":"مباريات مباشرة"},
+    {"id_topic":"alwan","name_topic":"الوان"},
+    {"id_topic":"shahid","name_topic":"شاهد"},
+    {"id_topic":"arabic_sport","name_topic":"رياضة"},
+    {"id_topic":"ar_1","name_topic":"ترفيه عربي"},
+    {"id_topic":"ar_2","name_topic":"أخبار"},
+    {"id_topic":"ar_3","name_topic":"أطفال"},
+    {"id_topic":"ar_5","name_topic":"وثائقي"},
+    {"id_topic":"ar_6","name_topic":"ديني"},
+    {"id_topic":"ar_7","name_topic":"أفلام"},
+    {"id_topic":"ar_8","name_topic":"موسيقى"},
+    {"id_topic":"art","name_topic":"ART"},
+    {"id_topic":"osn","name_topic":"OSN"},
+    {"id_topic":"netflix","name_topic":"NETFLIX"},
+    {"id_topic":"mbc","name_topic":"MBC"},
+    {"id_topic":"rotana","name_topic":"روتانا"},
+    {"id_topic":"cook","name_topic":"الطبخ"},
+    {"id_topic":"weyyak","name_topic":"وياك"},
+    {"id_topic":"bein_entir","name_topic":"بي ان ترفيه"},
+    {"id_topic":"bein_sport","name_topic":"بي ان سبورت"},
+    {"id_topic":"relax","name_topic":"ريلاكس"},
+    {"id_topic":"science","name_topic":"علوم"},
+    {"id_topic":"anime","name_topic":"انيمي"},
+    {"id_topic":"roya","name_topic":"رؤيا"},
+    {"id_topic":"twitch","name_topic":"Live Twitch"},
+    {"id_topic":"963","name_topic":"سوريا"},
+    {"id_topic":"961","name_topic":"لبنان"},
+    {"id_topic":"966","name_topic":"السعودية"},
+    {"id_topic":"20","name_topic":"مصر"}
+    // يمكنك إضافة باقي الدول هنا بنفس النمط
+];
+
+// مسار جديد لجلب القائمة الكاملة
+app.get("/get-all-topics", (req, res) => {
+    res.json(allTopics);
+});
+
 app.listen(PORT, () => {
     console.log("Server is running on port " + PORT);
 });
