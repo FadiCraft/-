@@ -19,23 +19,18 @@ function encryptAES(data) {
 }
 
 function decryptAES(encryptedText) {
-  try {
-    encryptedText = encryptedText.trim();
-    const lastColon = encryptedText.lastIndexOf(":");
-    const encryptedData = encryptedText.substring(0, lastColon);
-    const ivBase64 = encryptedText.substring(lastColon + 1);
-    
-    const decrypted = CryptoJS.AES.decrypt(encryptedData, KEY, {
-      iv: CryptoJS.enc.Base64.parse(ivBase64),
-      mode: CryptoJS.mode.CBC,
-      padding: CryptoJS.pad.Pkcs7
-    });
-    
-    return decrypted.toString(CryptoJS.enc.Utf8);
-  } catch (error) {
-    console.error("Decryption error:", error);
-    return null;
-  }
+  encryptedText = encryptedText.trim();
+  const lastColon = encryptedText.lastIndexOf(":");
+  const encryptedData = encryptedText.substring(0, lastColon);
+  const ivBase64 = encryptedText.substring(lastColon + 1);
+  
+  const decrypted = CryptoJS.AES.decrypt(encryptedData, KEY, {
+    iv: CryptoJS.enc.Base64.parse(ivBase64),
+    mode: CryptoJS.mode.CBC,
+    padding: CryptoJS.pad.Pkcs7
+  });
+  
+  return decrypted.toString(CryptoJS.enc.Utf8);
 }
 
 // الصفحة الرئيسية
@@ -77,26 +72,24 @@ app.get("/", async (req, res) => {
           "Accept-Language": "ar",
           "X-Requested-With": "XMLHttpRequest"
         },
-        timeout: 30000,
-        responseType: 'text' // تأكد من استلام النص كما هو
+        timeout: 30000
       }
     );
     
     const decryptedResponse = decryptAES(response.data);
-    if (decryptedResponse) {
-      const jsonResponse = JSON.parse(decryptedResponse);
-      res.json(jsonResponse);
-    } else {
-      res.json({ error: true, message: "فشل في فك التشفير" });
-    }
+    const jsonResponse = JSON.parse(decryptedResponse);
+    
+    res.json(jsonResponse);
     
   } catch (error) {
-    console.error("Error:", error.message);
     res.json({ error: true, message: error.message });
   }
 });
 
-// مسار البث - مع إصلاحات
+
+
+
+// مسار البث - مع محاكاة دقيقة واستلام البيانات الخام (Bytes)
 app.get("/stream", async (req, res) => {
   try {
     const id_live = req.query.id_live;
@@ -125,10 +118,7 @@ app.get("/stream", async (req, res) => {
       "id_live": id_live
     };
     
-    console.log("Sending data:", JSON.stringify(postData, null, 2));
-    
     const encryptedBody = encryptAES(JSON.stringify(postData));
-    console.log("Encrypted body length:", encryptedBody.length);
     
     const response = await axios.post(
       "http://live.1spbgmu.com/api/live/livedrama/v13.0.0/getLiveAllStreamsById",
@@ -138,80 +128,42 @@ app.get("/stream", async (req, res) => {
           "Content-Type": "text/plain",
           "User-Agent": "Dalvik/2.1.0 (Linux; U; Android 9; SM-S908E Build/TP1A.220624.014)",
           "Host": "live.1spbgmu.com",
-          "Connection": "Keep-Alive",
-          "Accept-Encoding": "gzip",
-          "Accept": "*/*",
-          "Accept-Language": "ar",
-          "X-Requested-With": "XMLHttpRequest"
+          "Connection": "Keep-Alive"
+          // تم إزالة Accept-Encoding يدوياً لترك Axios يتعامل مع فك الضغط بأمان
         },
         timeout: 30000,
-        responseType: 'text',
-        maxRedirects: 5,
-        validateStatus: function (status) {
-          return status >= 200 && status < 500; // قبول كل الردود ما عدا أخطاء السيرفر
-        }
+        // هذه الخطوة الأهم: استلام البيانات كبايتات خام لضمان عدم ضياع النص بسبب التشفير
+        responseType: "arraybuffer" 
       }
     );
     
-    console.log("Response status:", response.status);
-    console.log("Response headers:", response.headers);
-    console.log("Response data preview:", response.data.substring(0, 100));
+    // تحويل البايتات الخام إلى نص بشكل آمن، ثم تنظيف الفراغات
+    const rawText = Buffer.from(response.data).toString("utf-8");
+    const cleanEncryptedText = rawText.trim();
     
-    // إذا كان الرد يحتوي على نص مشفر، أرسله كما هو
-    if (response.data && response.data.includes(':')) {
-      res.type("text/plain").send(response.data);
-    } else {
-      // إذا كان الرد JSON خطأ، حاول فك تشفيره
-      const decrypted = decryptAES(response.data);
-      if (decrypted) {
-        try {
-          res.json(JSON.parse(decrypted));
-        } catch {
-          res.type("text/plain").send(response.data);
-        }
-      } else {
-        res.type("text/plain").send(response.data);
-      }
+    // في حال كان السيرفر لا يزال يرد بفراغ، سنطبع معلومات تفصيلية لمعرفة السبب
+    if (!cleanEncryptedText) {
+      return res.json({
+        error: true,
+        message: "السيرفر أرجع رداً فارغاً",
+        status: response.status,
+        headers: response.headers
+      });
     }
+    
+    // إرجاع النص المشفر الصافي
+    res.type("text/plain").send(cleanEncryptedText);
     
   } catch (error) {
-    console.error("Stream Error:", error.message);
-    if (error.response) {
-      console.error("Error response data:", error.response.data);
-      console.error("Error response status:", error.response.status);
-    }
-    res.json({ error: true, message: error.message });
+    res.json({ 
+      error: true, 
+      message: error.message,
+      details: error.response ? Buffer.from(error.response.data).toString("utf-8") : "No response data"
+    });
   }
 });
 
-// مسار لفك تشفير النص المستلم
-app.get("/decrypt", async (req, res) => {
-  try {
-    const encryptedText = req.query.data;
-    
-    if (!encryptedText) {
-      return res.json({ error: true, message: "يرجى إدخال النص المشفر" });
-    }
-    
-    const decrypted = decryptAES(encryptedText);
-    if (decrypted) {
-      try {
-        res.json(JSON.parse(decrypted));
-      } catch {
-        res.type("text/plain").send(decrypted);
-      }
-    } else {
-      res.json({ error: true, message: "فشل في فك التشفير" });
-    }
-  } catch (error) {
-    res.json({ error: true, message: error.message });
-  }
-});
 
 app.listen(PORT, () => {
   console.log("Server ready on port " + PORT);
-  console.log("Endpoints:");
-  console.log("GET / - القنوات الرئيسية");
-  console.log("GET /stream?id_live=XXX - البث المباشر");
-  console.log("GET /decrypt?data=XXX - فك التشفير");
 });
