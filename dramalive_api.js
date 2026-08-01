@@ -86,7 +86,10 @@ app.get("/", async (req, res) => {
   }
 });
 
-// مسار البث - مع محاكاة كاملة
+
+
+
+// مسار البث - استخراج النص المشفر الصافي
 app.get("/stream", async (req, res) => {
   try {
     const id_live = req.query.id_live;
@@ -131,17 +134,29 @@ app.get("/stream", async (req, res) => {
           "Accept-Language": "ar",
           "X-Requested-With": "XMLHttpRequest"
         },
-        timeout: 30000
+        timeout: 30000,
+        // هذه الإضافة تجبر السيرفر على إرجاع النص كما هو دون محاولة تحويله
+        responseType: "text" 
       }
     );
     
-    // إرجاع النص المشفر كما هو
-    res.type("text/plain").send(response.data);
+    // تنظيف النص من أي أسطر فارغة أو مسافات في البداية والنهاية
+    const cleanEncryptedText = (response.data || "").toString().trim();
+    
+    // إرسال النص المشفر الصافي
+    res.type("text/plain").send(cleanEncryptedText);
     
   } catch (error) {
-    res.json({ error: true, message: error.message });
+    // إرجاع تفاصيل الخطأ في حال رفض السيرفر الطلب
+    res.json({ 
+      error: true, 
+      message: error.message,
+      details: error.response ? error.response.data : null 
+    });
   }
 });
+
+
 
 app.listen(PORT, () => {
   console.log("Server ready on port " + PORT);
