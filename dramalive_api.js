@@ -89,6 +89,9 @@ app.get("/", async (req, res) => {
 
 
 
+
+
+// مسار البث - مع فك التشفير
 app.get("/stream", async (req, res) => {
   try {
     const id_live = req.query.id_live;
@@ -114,8 +117,6 @@ app.get("/stream", async (req, res) => {
       "appCount": "{\"adsFailed\":122,\"adsLoaded\":76,\"adsShowed\":29,\"runCount\":12}",
       "mainServer": "http://main.backendcoreapi.com/api/live/livedrama/v13.0.0/",
       "type": "tv",
-      
-      // هنا سنقوم بإرسال كل الاحتمالات الممكنة لاسم المتغير لتجنب رفض السيرفر
       "id_live": id_live,
       "id": id_live,
       "live_id": id_live,
@@ -143,20 +144,31 @@ app.get("/stream", async (req, res) => {
     const rawText = rawBuffer.toString("utf-8");
     const cleanEncryptedText = rawText.trim();
     
-    // إذا كان الرد أقصر من 50 بايت، فهذا يعني أنه خطأ وليس نصاً مشفراً
     if (rawBuffer.length < 50) {
       return res.json({
         error: true,
         message: "السيرفر رفض الطلب وأرجع رداً قصيراً",
         length: rawBuffer.length,
-        raw_text: rawText, // النص كما هو
-        hex: rawBuffer.toString("hex"), // تحويله لهيكس لكشف أي رموز مخفية
+        raw_text: rawText,
         status: response.status
       });
     }
     
-    // إرجاع النص المشفر الصافي إذا نجح الطلب
-    res.type("text/plain").send(cleanEncryptedText);
+    // --- عملية فك التشفير ---
+    const decryptedResponse = decryptAES(cleanEncryptedText);
+    
+    // محاولة تحويل النص المفكوك إلى JSON للرد كـ API منظم
+    try {
+      const jsonResponse = JSON.parse(decryptedResponse);
+      res.json(jsonResponse);
+    } catch (parseError) {
+      // في حال كان الرد مفكوكاً لكنه ليس بصيغة JSON
+      res.json({
+        error: true,
+        message: "تم فك التشفير بنجاح ولكن النص ليس JSON صالحاً",
+        decrypted_text: decryptedResponse
+      });
+    }
     
   } catch (error) {
     res.json({ 
@@ -166,7 +178,6 @@ app.get("/stream", async (req, res) => {
     });
   }
 });
-
 app.listen(PORT, () => {
   console.log("Server ready on port " + PORT);
 });
