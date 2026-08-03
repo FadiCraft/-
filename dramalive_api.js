@@ -37,22 +37,47 @@ function decryptAES(encryptedText) {
 // الدالة الموحدة لاستخراج الرابط المباشر
 async function extractStreamUrl(channelId, urlValue, agentType) {
     try {
-        // تحضير البيانات حسب نوع السيرفر
         let finalUrl;
+        
+        // تحضير البيانات حسب نوع السيرفر
         if (agentType === "redirect") {
-            // للسيرفرات اللي agentها redirect - نحول الرابط الوهمي
             if (urlValue.includes("daddy_")) {
                 const daddyId = urlValue.match(/daddy_(\d+)/)?.[1] || "";
-                finalUrl = `{"url":"https://hamis.romponalis.st/premiumtv/daddy4.php?id=${daddyId}","data":"","acceptSSL":"1","iframe":"https://daddylive.mov/embed/embed.php?id=${daddyId}&player=1&source=tv.json","headers":{"Referer":"https://dlhd.pk/"}}`;
+                finalUrl = JSON.stringify({
+                    "url": `https://hamis.romponalis.st/premiumtv/daddy4.php?id=${daddyId}`,
+                    "data": "",
+                    "acceptSSL": "1",
+                    "iframe": `https://daddylive.mov/embed/embed.php?id=${daddyId}&player=1&source=tv.json`,
+                    "headers": {
+                        "Referer": "https://dlhd.pk/"
+                    }
+                });
             } else if (urlValue.includes("LOAD_BALANCER")) {
-                finalUrl = `{"url":"${urlValue}","data":"","acceptSSL":"1","iframe":"","headers":{}}`;
+                finalUrl = JSON.stringify({
+                    "url": urlValue,
+                    "data": "",
+                    "acceptSSL": "1",
+                    "iframe": "",
+                    "headers": {}
+                });
             } else if (urlValue.includes("custom_handler")) {
-                finalUrl = `{"url":"${urlValue}","data":"","acceptSSL":"1","iframe":"","headers":{}}`;
+                finalUrl = JSON.stringify({
+                    "url": urlValue,
+                    "data": "",
+                    "acceptSSL": "1",
+                    "iframe": "",
+                    "headers": {}
+                });
             } else {
-                finalUrl = `{"url":"${urlValue}","data":"","acceptSSL":"1","iframe":"","headers":{}}`;
+                finalUrl = JSON.stringify({
+                    "url": urlValue,
+                    "data": "",
+                    "acceptSSL": "1",
+                    "iframe": "",
+                    "headers": {}
+                });
             }
         } else {
-            // للسيرفرات اللي agentها double_redirect - نستخدم الرابط كما هو
             finalUrl = urlValue;
         }
 
@@ -78,9 +103,10 @@ async function extractStreamUrl(channelId, urlValue, agentType) {
             "raw_data": ""
         };
 
+        console.log("Sending request with URL:", finalUrl);
+        
         const encryptedBody = encryptAES(JSON.stringify(postData));
 
-        // إرسال الطلب لنفس الرابط لكل الأنواع
         const response = await axios.post(
             "http://redirect.1spbgmu.com/redirect/getLiveByDoubleRedirect",
             encryptedBody,
@@ -98,12 +124,15 @@ async function extractStreamUrl(channelId, urlValue, agentType) {
         );
 
         const decryptedText = decryptAES(Buffer.from(response.data).toString("utf-8"));
+        console.log("Decrypted response:", decryptedText.substring(0, 200));
+        
         const jsonResponse = JSON.parse(decryptedText);
 
         let result = {
             stream_url: null,
             headers: {},
-            agent: "ExoPlayer"
+            agent: "ExoPlayer",
+            full_response: jsonResponse // للإطلاع على الرد الكامل
         };
 
         // استخراج الرابط من data.url
@@ -222,7 +251,7 @@ app.get("/channels", async (req, res) => {
 app.get("/stream", async (req, res) => {
     try {
         const id_live = req.query.id_live;
-        const extract = req.query.extract === "true"; // لاستخراج الروابط المباشرة
+        const extract = req.query.extract === "true";
         
         if (!id_live) return res.status(400).json({ error: true, message: "يرجى إرسال id_live" });
 
@@ -284,18 +313,10 @@ app.get("/stream", async (req, res) => {
                 drm: null
             };
 
-            // استخراج الرابط المباشر إذا كان مطلوباً
             if (extract && (mainAgent === "redirect" || mainAgent === "double_redirect")) {
-                try {
-                    const resolved = await extractStreamUrl(id_live, mainUrl, mainAgent);
-                    if (resolved.stream_url) {
-                        streamObj.direct_url = resolved.stream_url;
-                        streamObj.headers = resolved.headers;
-                        streamObj.stream_agent = resolved.agent;
-                    }
-                } catch (err) {
-                    console.error("Failed to extract main server:", err.message);
-                }
+                console.log("Extracting main server:", mainUrl);
+                const resolved = await extractStreamUrl(id_live, mainUrl, mainAgent);
+                streamObj.extracted = resolved;
             }
 
             parsedStreams.push(streamObj);
@@ -324,7 +345,6 @@ app.get("/stream", async (req, res) => {
                     headers: {}
                 };
 
-                // محاولة parsing الرابط كـ JSON
                 if (linkData.startsWith("{") && linkData.endsWith("}")) {
                     try {
                         const jsonObj = JSON.parse(linkData);
@@ -334,26 +354,24 @@ app.get("/stream", async (req, res) => {
                             streamObj.headers = jsonObj.headers;
                         }
                         if (jsonObj.drm) streamObj.drm = jsonObj.drm;
+                        
+                        // استخراج الرابط إذا كان double_redirect
+                        if (extract && agentData === "double_redirect") {
+                            console.log("Extracting double_redirect server:", linkData);
+                            const resolved = await extractStreamUrl(id_live, linkData, agentData);
+                            streamObj.extracted = resolved;
+                        }
                     } catch (e) {
                         streamObj.url = linkData;
                     }
                 } else {
                     streamObj.url = linkData;
-                }
-
-                // استخراج الرابط المباشر إذا كان مطلوباً
-                if (extract && streamObj.url && (agentData === "redirect" || agentData === "double_redirect")) {
-                    try {
-                        // استخدام linkData الأصلي للـ double_redirect
-                        const urlToUse = agentData === "double_redirect" ? linkData : streamObj.url;
-                        const resolved = await extractStreamUrl(id_live, urlToUse, agentData);
-                        if (resolved.stream_url) {
-                            streamObj.direct_url = resolved.stream_url;
-                            streamObj.stream_headers = resolved.headers;
-                            streamObj.stream_agent = resolved.agent;
-                        }
-                    } catch (err) {
-                        console.error(`Failed to extract server ${i}:`, err.message);
+                    
+                    // استخراج الرابط إذا كان redirect
+                    if (extract && agentData === "redirect") {
+                        console.log("Extracting redirect server:", linkData);
+                        const resolved = await extractStreamUrl(id_live, linkData, agentData);
+                        streamObj.extracted = resolved;
                     }
                 }
 
@@ -371,6 +389,7 @@ app.get("/stream", async (req, res) => {
         });
 
     } catch (error) {
+        console.error("Stream error:", error);
         res.status(500).json({ error: true, message: error.message });
     }
 });
@@ -389,6 +408,7 @@ app.all("/extract", async (req, res) => {
             });
         }
 
+        console.log("Extracting:", { channelId, urlValue, agentType });
         const result = await extractStreamUrl(channelId, urlValue, agentType);
         res.json(result);
 
@@ -404,21 +424,6 @@ const allTopics = [
     {"id_topic":"alwan","name_topic":"الوان","img_url_topic":"http://logo.twoapistack.work/img/topics/alwan.jpg","code":""},
     {"id_topic":"shahid","name_topic":"شاهد","img_url_topic":"http://logo.twoapistack.work/img/topics/shahid.jpg","code":""},
     {"id_topic":"arabic_sport","name_topic":"رياضة","img_url_topic":"http://logo.twoapistack.work/img/topics/ic_basketball_red.png","code":""},
-    {"id_topic":"ar_1","name_topic":"ترفيه عربي","img_url_topic":"http://logo.twoapistack.work/img/topics/ic_featured_ar.png","code":""},
-    {"id_topic":"ar_2","name_topic":"أخبار","img_url_topic":"http://logo.twoapistack.work/img/topics/ic_newspaper.png","code":""},
-    {"id_topic":"ar_3","name_topic":"أطفال","img_url_topic":"http://logo.twoapistack.work/img/topics/ic_kids.jpg","code":""},
-    {"id_topic":"ar_5","name_topic":"وثائقي","img_url_topic":"http://logo.twoapistack.work/img/topics/ic_documantry.png","code":""},
-    {"id_topic":"ar_6","name_topic":"ديني","img_url_topic":"http://logo.twoapistack.work/img/topics/ic__mosque.png","code":""},
-    {"id_topic":"ar_7","name_topic":"أفلام","img_url_topic":"http://logo.twoapistack.work/img/topics/ic_film.png","code":""},
-    {"id_topic":"ar_8","name_topic":"موسيقى","img_url_topic":"http://logo.twoapistack.work/img/topics/ic_music.jpg","code":""},
-    {"id_topic":"art","name_topic":"ART","img_url_topic":"http://logo.twoapistack.work/img/topics/art.png","code":""},
-    {"id_topic":"osn","name_topic":"OSN","img_url_topic":"http://logo.twoapistack.work/img/topics/osn_logo.png","code":""},
-    {"id_topic":"netflix","name_topic":"NETFLIX","img_url_topic":"http://logo.twoapistack.work/img/topics/netflix.jpg","code":""},
-    {"id_topic":"mbc","name_topic":"MBC","img_url_topic":"http://logo.twoapistack.work/img/topics/mpc.jpg","code":""},
-    {"id_topic":"rotana","name_topic":"روتانا","img_url_topic":"http://logo.twoapistack.work/img/topics/rotana.jpg","code":""},
-    {"id_topic":"cook","name_topic":"الطبخ","img_url_topic":"http://logo.twoapistack.work/img/topics/ic_chef.png","code":""},
-    {"id_topic":"weyyak","name_topic":"وياك","img_url_topic":"http://logo.twoapistack.work/img/topics/weyyak.jpg","code":""},
-    {"id_topic":"bein_entir","name_topic":"بي ان ترفيه","img_url_topic":"http://logo.twoapistack.work/img/topics/bein_enter.jpg","code":""},
     {"id_topic":"bein_sport","name_topic":"بي ان سبورت","img_url_topic":"http://logo.twoapistack.work/img/topics/bein_sport.png","code":""}
 ];
 
