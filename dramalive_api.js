@@ -5,7 +5,7 @@ const CryptoJS = require("crypto-js");
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-// السماح بقراءة البيانات المرسلة بصيغة JSON (مهم للمسار الجديد)
+// السماح بقراءة البيانات المرسلة بصيغة JSON
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
@@ -39,7 +39,7 @@ function decryptAES(encryptedText) {
 }
 
 // ==========================================
-// دالة جديدة: فك الرابط الوهمي (Double Redirect)
+// دالة: فك الرابط الوهمي (تُرجع الرد كاملاً)
 // ==========================================
 async function resolveRedirectUrl(fakeUrl) {
     try {
@@ -71,28 +71,21 @@ async function resolveRedirectUrl(fakeUrl) {
                     "Host": "redirect.1spbgmu.com",
                     "Connection": "Keep-Alive"
                 },
-                timeout: 15000
+                timeout: 15000,
+                // ضروري حتى لا يتلف النص المشفر القادم من السيرفر
+                responseType: "arraybuffer" 
             }
         );
 
-        const decryptedResponse = decryptAES(response.data);
-        const jsonResponse = JSON.parse(decryptedResponse);
+        // تحويل البيانات القادمة إلى نص ثم فك التشفير
+        const decryptedText = decryptAES(Buffer.from(response.data).toString("utf-8"));
+        
+        // إرجاع الرد ككائن JSON
+        return JSON.parse(decryptedText);
 
-        if (jsonResponse.result === 0 && jsonResponse.data && jsonResponse.data.url) {
-            let finalStreamData;
-            try {
-                // محاولة تحويل الرابط الداخلي إذا كان بصيغة JSON (يحتوي على headers)
-                finalStreamData = JSON.parse(jsonResponse.data.url);
-            } catch (e) {
-                // إذا كان الرابط نصياً عادياً
-                finalStreamData = { url: jsonResponse.data.url, agent: jsonResponse.data.agent };
-            }
-            return finalStreamData;
-        }
-        return null;
     } catch (error) {
         console.error("Error resolving redirect:", error.message);
-        return null;
+        return { error: true, message: error.message };
     }
 }
 
@@ -288,40 +281,29 @@ app.get("/stream", async (req, res) => {
 });
 
 // ==========================================
-// 3. مسار جديد: استخراج الرابط الحقيقي (Resolve)
+// 3. مسار استخراج الرابط (يُرجع استجابة السيرفر كاملة)
 // يقبل الطلبات بصيغة GET أو POST
 // ==========================================
 app.all("/resolve", async (req, res) => {
     try {
-        // قراءة الرابط سواء تم إرساله كـ Query Parameter أو داخل الـ Body
         const targetUrl = req.query.url || req.body.url; 
         
         if (!targetUrl) {
             return res.status(400).json({ error: true, message: "يرجى إرسال الرابط (url) المراد استخراجه" });
         }
 
-        const realStreamData = await resolveRedirectUrl(targetUrl);
+        // جلب الرد المفكوك تشفيره مباشرة
+        const serverResponse = await resolveRedirectUrl(targetUrl);
 
-        if (realStreamData && realStreamData.url) {
-            const finalResponse = {
-                error: false,
-                play_url: realStreamData.url,
-                agent: realStreamData.agent || "ExoPlayer",
-                headers: realStreamData.headers || null,
-                media_type: realStreamData.mediatype || "hls"
-            };
-
-            res.json(finalResponse);
-        } else {
-            res.status(404).json({ error: true, message: "فشل استخراج الرابط الحقيقي أو السيرفر متوقف" });
-        }
+        // إرجاع الرد كما هو للمعاينة والاستخدام
+        res.json(serverResponse);
 
     } catch (error) {
         res.status(500).json({ error: true, message: error.message });
     }
 });
 
-// قائمة الأقسام
+// قائمة الأقسام (Topics)
 const allTopics = [
     {"id_topic":"hot_now","name_topic":"الأكثر مشاهدة","img_url_topic":"http://logo.twoapistack.work/img/topics/hot_now.png","code":""},
     {"id_topic":"live_matches","name_topic":"مباريات مباشرة","img_url_topic":"http://logo.twoapistack.work/img/topics/ic_fire.jpg","code":""},
