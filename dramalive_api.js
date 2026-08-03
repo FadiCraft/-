@@ -274,17 +274,14 @@ app.get("/stream", async (req, res) => {
     }
 });
 
-// 3. مسار استخراج الرابط النهائي
 app.all("/resolve", async (req, res) => {
     try {
-        const targetUrl = req.query.url || req.body.url; 
+        // إذا لم تقم بإرسال رابط، سيقوم بتجربة هذا الرابط الافتراضي تلقائياً للتأكد من عمله
+        const targetUrl = req.query.url || req.body.url || "http://.LS.V2daddy_91/s"; 
+        
         const customUserId = req.query.user_id || req.body.user_id;
         const customDeviceId = req.query.device_id || req.body.device_id;
         
-        if (!targetUrl) {
-            return res.status(400).json({ error: true, message: "يرجى إرسال الرابط (url) المراد استخراجه" });
-        }
-
         const result = await resolveRedirectUrl(targetUrl, customUserId, customDeviceId);
         res.json(result);
 
