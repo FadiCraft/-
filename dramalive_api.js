@@ -34,8 +34,36 @@ function decryptAES(encryptedText) {
     return decrypted.toString(CryptoJS.enc.Utf8);
 }
 
+// توليد raw_data ديناميكي حسب نوع الرابط
+function generateRawData(fakeUrl, channelId) {
+    let serverId = "";
+    let title = "";
+    
+    // استخراج ID من الرابط
+    if (fakeUrl.includes("daddy_")) {
+        serverId = fakeUrl.match(/daddy_(\d+)/)?.[1] || "";
+        title = serverId;
+    } else if (fakeUrl.includes("redirectV2_")) {
+        const match = fakeUrl.match(/redirectV2_(\w+)_/);
+        serverId = match ? match[1] : channelId;
+        title = serverId;
+    } else if (fakeUrl.includes("LOAD_BALANCER")) {
+        serverId = fakeUrl.replace(/.*LOAD_BALANCER/, "").replace(/\/s$/, "");
+        title = serverId;
+    } else if (fakeUrl.includes("custom_handler")) {
+        serverId = channelId;
+        title = channelId;
+    } else {
+        serverId = channelId;
+        title = channelId;
+    }
+
+    return `\r\n \n\n\n\n\n\n\n\n<html>\n<head>\n<title>${title}</title>\n\n<style>\nhtml, body {\n  margin: 0;\n  padding: 0;\n  height: 100%;\n  overflow: hidden;\n  background: black;\n}\n\n#player {\n  width: 100vw;\n  height: 100vh;\n}\n\n.container {\n  height: 100%;\n}\n</style>\n\n\n<script>(function(s){s.dataset.zone='10227946',s.src='https://llvpn.com/tag.min.js'})([document.documentElement, document.body].filter(Boolean).pop().appendChild(document.createElement('script')))</script>\n \n\n\n<script src="//cdn.jsdelivr.net/npm/@clappr/player@0.11.6/dist/clappr.min.js"></script>\n<script src="//cdn.jsdelivr.net/npm/clappr-pip@latest/dist/clappr-pip.min.js"></script>\n<script src="//cdn.jsdelivr.net/npm/@swarmcloud/hls/p2p-engine.min.js"></script>\n</head>\n\n<body class="container">\n\n<div id="player"></div>\n\n<script>\n(async () => {\n\n  const p2pConfig = {\n    live: true,\n    token: "greek",\n    channelId: "${serverId}",\n    announce: "https://ann.cdn-lab.shop/v1",\n    showSlogan: false,\n    sharePlaylist: false,\n    startFromSegmentOffset: 0,\n    trickleICE: true,\n  };\n\n\n\n  var player = new Clappr.Player({\n    source:window.atob(''),\n    mediacontrol: { seekbar: "#FFFFFF", buttons: "#FFFFFF" },\n    mimeType: "application/x-mpegURL",\n    height: "100%",\n    width: "100%",\n    autoPlay: true,\n    mute: true,\n    plugins: [ClapprPip.PipButton, ClapprPip.PipPlugin],\n    playback: {\n      hlsjsConfig: {\n        maxBufferLength: 5,\n        liveSyncDurationCount: 3,\n      },\n    },\n  });\n\n  player.attachTo(document.getElementById("player"));\n  p2pConfig.hlsjsInstance = player.core.getCurrentPlayback()?._hls;\n  new P2PEngineHls(p2pConfig);\n\n})();\n</script>\n\n<div style="display:none;">\n  <script id="_waup77">\n    var _wau = _wau || [];\n    _wau.push(["classic", "ra5fzi2hwk", "p77"]);\n  </script>\n  <script async src="//waust.at/c.js"></script>\n</div>\n\n<script>\n    // disable right click\n    document.addEventListener('contextmenu', event => event.preventDefault());\n\n    document.onkeydown = function (e) {\n\n        // disable F12 key\n        if(e.keyCode == 123) {\n            return false;\n        }\n\n        // disable I key\n        if(e.ctrlKey && e.shiftKey && e.keyCode == 73){\n            return false;\n        }\n\n        // disable J key\n        if(e.ctrlKey && e.shiftKey && e.keyCode == 74) {\n            return false;\n        }\n\n        // disable U key\n        if(e.ctrlKey && e.keyCode == 85) {\n            return false;\n        }\n    }\n\n</script>\n\n\n\n\n  \n\n</body>\n</html>`;
+}
+
 // تحويل الرابط الوهمي إلى JSON
 function convertFakeUrl(fakeUrl) {
+    // للروابط اللي فيها daddy
     if (fakeUrl.includes("daddy_")) {
         const daddyId = fakeUrl.match(/daddy_(\d+)/)?.[1] || "";
         return JSON.stringify({
@@ -47,7 +75,19 @@ function convertFakeUrl(fakeUrl) {
                 "Referer": "https://dlhd.pk/"
             }
         });
-    } else {
+    }
+    // للروابط اللي فيها redirectV2
+    else if (fakeUrl.includes("redirectV2_")) {
+        return JSON.stringify({
+            "url": fakeUrl,
+            "data": "",
+            "acceptSSL": "1",
+            "iframe": "",
+            "headers": {}
+        });
+    }
+    // لباقي الروابط
+    else {
         return JSON.stringify({
             "url": fakeUrl,
             "data": "",
@@ -58,16 +98,12 @@ function convertFakeUrl(fakeUrl) {
     }
 }
 
-// الدالة الكاملة لاستخراج الرابط (خطوة واحدة ببيانات التطبيق الأصلية)
+// الدالة الكاملة لاستخراج الرابط
 async function extractStreamUrl(channelId, fakeUrl) {
     try {
-        // تجهيز الرابط الوهمي
         const urlData = convertFakeUrl(fakeUrl);
+        const rawData = generateRawData(fakeUrl, channelId);
 
-        // هذا هو الـ raw_data اللي التطبيق بيبعته (HTML كامل)
-        const rawData = `\r\n \n\n\n\n\n\n\n\n<html>\n<head>\n<title>91</title>\n\n<style>\nhtml, body {\n  margin: 0;\n  padding: 0;\n  height: 100%;\n  overflow: hidden;\n  background: black;\n}\n\n#player {\n  width: 100vw;\n  height: 100vh;\n}\n\n.container {\n  height: 100%;\n}\n</style>\n\n\n<script>(function(s){s.dataset.zone='10227946',s.src='https://llvpn.com/tag.min.js'})([document.documentElement, document.body].filter(Boolean).pop().appendChild(document.createElement('script')))</script>\n \n\n\n<script src="//cdn.jsdelivr.net/npm/@clappr/player@0.11.6/dist/clappr.min.js"></script>\n<script src="//cdn.jsdelivr.net/npm/clappr-pip@latest/dist/clappr-pip.min.js"></script>\n<script src="//cdn.jsdelivr.net/npm/@swarmcloud/hls/p2p-engine.min.js"></script>\n</head>\n\n<body class="container">\n\n<div id="player"></div>\n\n<script>\n(async () => {\n\n  const p2pConfig = {\n    live: true,\n    token: "greek",\n    channelId: "91",\n    announce: "https://ann.cdn-lab.shop/v1",\n    showSlogan: false,\n    sharePlaylist: false,\n    startFromSegmentOffset: 0,\n    trickleICE: true,\n  };\n\n\n\n  var player = new Clappr.Player({\n    source:window.atob('aHR0cHM6Ly94YW1lbGVvbi5waGFudGVtbGlzLnRvcC9mb3VyL3NlY3VyZS80OGFiMjhhZGQyMzI0NDk0ZmU2ZGM1NjE3ZTNkNTdkMC8xNzg1ODAxODUyL3ByZW1pdW05MS9pbmRleC5tM3U4'),\n    mediacontrol: { seekbar: "#FFFFFF", buttons: "#FFFFFF" },\n    mimeType: "application/x-mpegURL",\n    height: "100%",\n    width: "100%",\n    autoPlay: true,\n    mute: true,\n    plugins: [ClapprPip.PipButton, ClapprPip.PipPlugin],\n    playback: {\n      hlsjsConfig: {\n        maxBufferLength: 5,\n        liveSyncDurationCount: 3,\n      },\n    },\n  });\n\n  player.attachTo(document.getElementById("player"));\n  p2pConfig.hlsjsInstance = player.core.getCurrentPlayback()?._hls;\n  new P2PEngineHls(p2pConfig);\n\n})();\n</script>\n\n<div style="display:none;">\n  <script id="_waup77">\n    var _wau = _wau || [];\n    _wau.push(["classic", "ra5fzi2hwk", "p77"]);\n  </script>\n  <script async src="//waust.at/c.js"></script>\n</div>\n\n<script>\n    // disable right click\n    document.addEventListener('contextmenu', event => event.preventDefault());\n\n    document.onkeydown = function (e) {\n\n        // disable F12 key\n        if(e.keyCode == 123) {\n            return false;\n        }\n\n        // disable I key\n        if(e.ctrlKey && e.shiftKey && e.keyCode == 73){\n            return false;\n        }\n\n        // disable J key\n        if(e.ctrlKey && e.shiftKey && e.keyCode == 74) {\n            return false;\n        }\n\n        // disable U key\n        if(e.ctrlKey && e.keyCode == 85) {\n            return false;\n        }\n    }\n\n</script>\n\n\n\n\n  \n\n</body>\n</html>`;
-
-        // البيانات بالضبط زي ما التطبيق ببعتها
         const postData = {
             "user_id": "_82668_1785761367217_notloggedin.com_dramalive3",
             "device_id": "e603540e-ed93-47a3-bec6-a15f7f056604",
@@ -91,8 +127,6 @@ async function extractStreamUrl(channelId, fakeUrl) {
             "raw_data": rawData
         };
 
-        console.log("Sending request with raw_data length:", rawData.length);
-        
         const encryptedBody = encryptAES(JSON.stringify(postData));
 
         const response = await axios.post(
@@ -112,22 +146,21 @@ async function extractStreamUrl(channelId, fakeUrl) {
         );
 
         const decryptedText = decryptAES(Buffer.from(response.data).toString("utf-8"));
-        console.log("Full response:", decryptedText);
-        
         const jsonResponse = JSON.parse(decryptedText);
 
         let result = {
             stream_url: null,
             headers: {},
-            agent: "ExoPlayer",
-            full_response: jsonResponse
+            agent: "ExoPlayer"
         };
 
         // استخراج الرابط من data.url
         if (jsonResponse.data && jsonResponse.data.url) {
             try {
                 const innerData = JSON.parse(jsonResponse.data.url);
-                result.stream_url = innerData.url || null;
+                if (innerData.url && innerData.url.length > 0) {
+                    result.stream_url = innerData.url;
+                }
                 if (innerData.headers) {
                     result.headers = innerData.headers;
                 }
@@ -135,7 +168,9 @@ async function extractStreamUrl(channelId, fakeUrl) {
                     result.agent = innerData.agent;
                 }
             } catch (e) {
-                result.stream_url = jsonResponse.data.url;
+                if (jsonResponse.data.url.length > 0 && jsonResponse.data.url.startsWith("http")) {
+                    result.stream_url = jsonResponse.data.url;
+                }
             }
         }
 
@@ -168,7 +203,7 @@ async function extractStreamUrl(channelId, fakeUrl) {
         return result;
 
     } catch (error) {
-        console.error("Error:", error.message);
+        console.error(`Error extracting ${fakeUrl}:`, error.message);
         return { stream_url: null, error: error.message };
     }
 }
@@ -234,7 +269,7 @@ app.get("/channels", async (req, res) => {
     }
 });
 
-// 2. مسار جلب روابط البث مع استخراج الروابط المباشرة
+// 2. مسار جلب روابط البث مع استخراج الروابط المباشرة - بالتوازي للسرعة
 app.get("/stream", async (req, res) => {
     try {
         const id_live = req.query.id_live;
@@ -287,6 +322,7 @@ app.get("/stream", async (req, res) => {
         const liveData = rawJson.live || {};
 
         let parsedStreams = [];
+        let extractPromises = [];
         
         // معالجة السيرفر الأساسي
         const mainUrl = liveData.url || "";
@@ -300,15 +336,20 @@ app.get("/stream", async (req, res) => {
                 drm: null
             };
 
-            if (extract && (mainAgent === "redirect" || mainAgent === "double_redirect")) {
-                const resolved = await extractStreamUrl(id_live, mainUrl);
-                if (resolved.stream_url) {
-                    streamObj.direct_url = resolved.stream_url;
-                    streamObj.stream_headers = resolved.headers;
-                }
-            }
-
             parsedStreams.push(streamObj);
+            
+            if (extract && (mainAgent === "redirect" || mainAgent === "double_redirect")) {
+                extractPromises.push(
+                    extractStreamUrl(id_live, mainUrl)
+                        .then(resolved => {
+                            if (resolved.stream_url) {
+                                streamObj.direct_url = resolved.stream_url;
+                                streamObj.stream_headers = resolved.headers;
+                            }
+                        })
+                        .catch(() => {})
+                );
+            }
         }
 
         // معالجة السيرفرات الاحتياطية
@@ -348,18 +389,29 @@ app.get("/stream", async (req, res) => {
                     streamObj.url = linkData;
                 }
 
-                if (extract && (agentData === "redirect" || agentData === "double_redirect")) {
-                    const resolved = await extractStreamUrl(id_live, streamObj.url);
-                    if (resolved.stream_url) {
-                        streamObj.direct_url = resolved.stream_url;
-                        streamObj.stream_headers = resolved.headers;
-                    }
-                }
-
                 if (streamObj.url) {
                     parsedStreams.push(streamObj);
+                    
+                    if (extract && (agentData === "redirect" || agentData === "double_redirect")) {
+                        const urlToExtract = streamObj.url;
+                        extractPromises.push(
+                            extractStreamUrl(id_live, urlToExtract)
+                                .then(resolved => {
+                                    if (resolved.stream_url) {
+                                        streamObj.direct_url = resolved.stream_url;
+                                        streamObj.stream_headers = resolved.headers;
+                                    }
+                                })
+                                .catch(() => {})
+                        );
+                    }
                 }
             }
+        }
+
+        // انتظار كل عمليات الاستخراج بالتوازي
+        if (extractPromises.length > 0) {
+            await Promise.allSettled(extractPromises);
         }
 
         res.json({
