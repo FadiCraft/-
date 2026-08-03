@@ -39,13 +39,13 @@ function decryptAES(encryptedText) {
 }
 
 // ==========================================
-// دالة: فك الرابط الوهمي (تُرجع الرد كاملاً)
+// دالة: فك الرابط الوهمي (مع دعم تمرير بيانات مخصصة)
 // ==========================================
-async function resolveRedirectUrl(fakeUrl) {
+async function resolveRedirectUrl(fakeUrl, customUserId, customDeviceId) {
     try {
         const postData = {
-            "user_id": "_19449_1785337989457_notloggedin.com_dramalive3",
-            "device_id": "dde6f748-9857-4140-b133-4ccfaeb015fe",
+            "user_id": customUserId || "_19449_1785337989457_notloggedin.com_dramalive3",
+            "device_id": customDeviceId || "dde6f748-9857-4140-b133-4ccfaeb015fe",
             "device_api": "28",
             "version_name": "187",
             "language": "ar",
@@ -72,15 +72,11 @@ async function resolveRedirectUrl(fakeUrl) {
                     "Connection": "Keep-Alive"
                 },
                 timeout: 15000,
-                // ضروري حتى لا يتلف النص المشفر القادم من السيرفر
                 responseType: "arraybuffer" 
             }
         );
 
-        // تحويل البيانات القادمة إلى نص ثم فك التشفير
         const decryptedText = decryptAES(Buffer.from(response.data).toString("utf-8"));
-        
-        // إرجاع الرد ككائن JSON
         return JSON.parse(decryptedText);
 
     } catch (error) {
@@ -210,7 +206,6 @@ app.get("/stream", async (req, res) => {
 
         let parsedStreams = [];
 
-        // السيرفر الأساسي
         const mainUrl = liveData.url || "";
         if (mainUrl.startsWith("http") && !mainUrl.includes(".LS.V2live")) {
             parsedStreams.push({
@@ -221,11 +216,10 @@ app.get("/stream", async (req, res) => {
             });
         }
 
-        // السيرفرات الاحتياطية
         const backupStr = liveData.backup || "";
         if (backupStr) {
             const parts = backupStr.split("-;-");
-            parts.forEach((part, index) => {
+            parts.forEach((part) => {
                 part = part.trim();
                 if (!part) return;
 
@@ -253,9 +247,7 @@ app.get("/stream", async (req, res) => {
                         if (jsonObj.drm) {
                             streamObj.drm = jsonObj.drm;
                         }
-                    } catch (e) {
-                        // تجاهل الخطأ
-                    }
+                    } catch (e) {}
                 } else {
                     streamObj.url = linkData;
                 }
@@ -281,21 +273,19 @@ app.get("/stream", async (req, res) => {
 });
 
 // ==========================================
-// 3. مسار استخراج الرابط (يُرجع استجابة السيرفر كاملة)
-// يقبل الطلبات بصيغة GET أو POST
+// 3. مسار استخراج الرابط (يدعم تمرير device_id و user_id عبر الطلب)
 // ==========================================
 app.all("/resolve", async (req, res) => {
     try {
         const targetUrl = req.query.url || req.body.url; 
+        const customUserId = req.query.user_id || req.body.user_id;
+        const customDeviceId = req.query.device_id || req.body.device_id;
         
         if (!targetUrl) {
             return res.status(400).json({ error: true, message: "يرجى إرسال الرابط (url) المراد استخراجه" });
         }
 
-        // جلب الرد المفكوك تشفيره مباشرة
-        const serverResponse = await resolveRedirectUrl(targetUrl);
-
-        // إرجاع الرد كما هو للمعاينة والاستخدام
+        const serverResponse = await resolveRedirectUrl(targetUrl, customUserId, customDeviceId);
         res.json(serverResponse);
 
     } catch (error) {
@@ -345,12 +335,12 @@ const allTopics = [
     {"id_topic":"967","name_topic":"اليمن","img_url_topic":"http://logo.twoapistack.work/img/topics/ic_flag_ye.png","code":"ye"},
     {"id_topic":"973","name_topic":"البحرين","img_url_topic":"http://logo.twoapistack.work/img/topics/ic_flag_bh.png","code":"bh"},
     {"id_topic":"970","name_topic":"فلسطين","img_url_topic":"http://logo.twoapistack.work/img/topics/ic_flag_ps.png","code":"ps"},
-    {"id_topic":"249","name_topic":"السودان","img_url_topic":"http://logo.twoapistack.work/img/topics/ic_flag_sd.png","code":"sd"},
-    {"id_topic":"216","name_topic":"تونس","img_url_topic":"http://logo.twoapistack.work/img/topics/ic_flag_tn.png","code":"tn"},
-    {"id_topic":"212","name_topic":"المغرب","img_url_topic":"http://logo.twoapistack.work/img/topics/ic_flag_ma.png","code":"ma"},
-    {"id_topic":"213","name_topic":"الجزائر","img_url_topic":"http://logo.twoapistack.work/img/topics/ic_flag_dz.png","code":"dz"},
-    {"id_topic":"218","name_topic":"ليبيا","img_url_topic":"http://logo.twoapistack.work/img/topics/ic_flag_ly.png","code":"ly"},
-    {"id_topic":"252","name_topic":"الصومال","img_url_topic":"http://logo.twoapistack.work/img/topics/ic_flag_so.png","code":"so"}
+    {"id_topic":"249","name_topic":"السودان","img_url_topic":"http://logo.twoapistack.work/img/topics/ic_flag_sd.png","code":""},
+    {"id_topic":"216","name_topic":"تونس","img_url_topic":"http://logo.twoapistack.work/img/topics/ic_flag_tn.png","code":""},
+    {"id_topic":"212","name_topic":"المغرب","img_url_topic":"http://logo.twoapistack.work/img/topics/ic_flag_ma.png","code":""},
+    {"id_topic":"213","name_topic":"الجزائر","img_url_topic":"http://logo.twoapistack.work/img/topics/ic_flag_dz.png","code":""},
+    {"id_topic":"218","name_topic":"ليبيا","img_url_topic":"http://logo.twoapistack.work/img/topics/ic_flag_ly.png","code":""},
+    {"id_topic":"252","name_topic":"الصومال","img_url_topic":"http://logo.twoapistack.work/img/topics/ic_flag_so.png","code":""}
 ];
 
 app.get("/get-all-topics", (req, res) => {
