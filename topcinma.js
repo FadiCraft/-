@@ -218,9 +218,8 @@ app.get('/api/episodes', async (req, res) => {
 
 
 
-
 // ---------------------------------------------------------
-// المسار السريع لاستخراج السيرفرات كلها بصيغة JSON (باستثناء الأول 0 و updown)
+// المسار السريع لاستخراج السيرفرات كلها بصيغة JSON
 // ---------------------------------------------------------
 
 app.get('/api/watch', async (req, res) => {
@@ -249,14 +248,22 @@ app.get('/api/watch', async (req, res) => {
         const serverIndexes = [];
         $('.server--item').each((i, el) => {
             const serverNum = $(el).attr('data-server');
-            // لا تضف السيرفر إذا كان ترتيبه الأول (i === 0) أو رقمه 0
             if (i > 0 && serverNum !== "0") { 
                 serverIndexes.push(serverNum);
             }
         });
 
-        // 3. تجربة السيرفرات بالترتيب وتخزين الشغال منها
-        const serverUrl = "https://topcinemaa.co/wp-content/themes/movies2023/Ajaxat/Single/Server.php";
+        // ==========================================
+        // 💡 التعديل هنا: استخراج الدومين الفعّال ديناميكياً
+        // ==========================================
+        // نأخذ الرابط النهائي من الاستجابة (هذا يفيد في حال كان هناك Redirect لدومين جديد)
+        const finalUrl = new URL(pageResponse.url);
+        const currentDomain = finalUrl.origin; // سيجلب مثلاً: https://topcinemaa.co أو أي دومين جديد
+        
+        // بناء رابط الـ Ajax الخاص بالسيرفرات بناءً على الدومين الحالي
+        const serverUrl = `${currentDomain}/wp-content/themes/movies2023/Ajaxat/Single/Server.php`;
+        // ==========================================
+
         const validServers = []; // مصفوفة لتخزين السيرفرات الشغالة
         
         for (let i of serverIndexes) {
@@ -267,7 +274,7 @@ app.get('/api/watch', async (req, res) => {
                     headers: {
                         "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8",
                         "X-Requested-With": "XMLHttpRequest",
-                        "Referer": encodeURI(targetUrl)
+                        "Referer": pageResponse.url // تم التعديل لتمرير الرابط الصحيح كـ Referer
                     }
                 });
 
@@ -276,13 +283,11 @@ app.get('/api/watch', async (req, res) => {
                 const iframeSrc = $$('iframe').attr('src') || "";
 
                 // 4. التحقق مما إذا كان الرابط صالحاً 
-                // تمت إضافة 'updown' و 'updown.icu' لمنع هذا السيرفر نهائياً
                 const blockedDomains = ['llvpn', 'ads', 'pop', 'blank','d0o0d','d0o0d.com', 'updown.icu', 'updown'];
                 const isBlocked = blockedDomains.some(d => iframeSrc.includes(d));
 
                 if (iframeSrc && iframeSrc.startsWith('http') && !isBlocked) {
                     console.log(`✅ تم العثور على سيرفر صالح: ${iframeSrc}`);
-                    // إضافة السيرفر للقائمة بالصيغة المطلوبة
                     validServers.push({
                         url: iframeSrc
                     });
