@@ -34,43 +34,32 @@ function decryptAES(encryptedText) {
     return decrypted.toString(CryptoJS.enc.Utf8);
 }
 
-// تحويل الرابط الوهمي إلى JSON
-function convertFakeUrl(fakeUrl) {
-    if (fakeUrl.includes("daddy_")) {
-        const daddyId = fakeUrl.match(/daddy_(\d+)/)?.[1] || "";
-        return JSON.stringify({
-            "url": `https://hamis.romponalis.st/premiumtv/daddy4.php?id=${daddyId}`,
-            "data": "",
-            "acceptSSL": "1",
-            "iframe": `https://daddylive.mov/embed/embed.php?id=${daddyId}&player=1&source=tv.json`,
-            "headers": {
-                "Referer": "https://dlhd.pk/"
-            }
-        });
-    } else {
-        return JSON.stringify({
-            "url": fakeUrl,
-            "data": "",
-            "acceptSSL": "1",
-            "iframe": "",
-            "headers": {}
-        });
-    }
-}
-
-// الدالة الموحدة لاستخراج الرابط المباشر
-async function extractStreamUrl(channelId, urlValue, agentType) {
+// الخطوة الأولى: استخراج الرابط من getLiveByRedirect
+async function step1_getLiveByRedirect(channelId, fakeUrl) {
     try {
-        let finalUrl;
-        
-        // تحويل الرابط الوهمي إلى JSON إذا كان من نوع redirect
-        if (agentType === "redirect") {
-            finalUrl = convertFakeUrl(urlValue);
+        // تجهيز الرابط الوهمي
+        let urlData;
+        if (fakeUrl.includes("daddy_")) {
+            const daddyId = fakeUrl.match(/daddy_(\d+)/)?.[1] || "";
+            urlData = JSON.stringify({
+                "url": `https://hamis.romponalis.st/premiumtv/daddy4.php?id=${daddyId}`,
+                "data": "",
+                "acceptSSL": "1",
+                "iframe": `https://daddylive.mov/embed/embed.php?id=${daddyId}&player=1&source=tv.json`,
+                "headers": {
+                    "Referer": "https://dlhd.pk/"
+                }
+            });
         } else {
-            finalUrl = urlValue;
+            urlData = JSON.stringify({
+                "url": fakeUrl,
+                "data": "",
+                "acceptSSL": "1",
+                "iframe": "",
+                "headers": {}
+            });
         }
 
-        // البيانات بالضبط زي ما التطبيق ببعتها
         const postData = {
             "user_id": "_82668_1785761367217_notloggedin.com_dramalive3",
             "device_id": "e603540e-ed93-47a3-bec6-a15f7f056604",
@@ -89,12 +78,78 @@ async function extractStreamUrl(channelId, urlValue, agentType) {
             "mainServer": "http://main.eastgoessouth.online/api/live/livedrama/v13.0.0/",
             "type": "tv",
             "id": channelId,
-            "url": finalUrl,
-            "agent": "double_redirect",  // المهم: دايمًا double_redirect
+            "url": urlData,
+            "agent": "double_redirect",
             "raw_data": ""
         };
 
-        console.log("Sending data:", JSON.stringify(postData).substring(0, 300));
+        console.log("Step 1 - Sending to getLiveByRedirect");
+        
+        const encryptedBody = encryptAES(JSON.stringify(postData));
+
+        const response = await axios.post(
+            "http://redirect.1spbgmu.com/redirect/getLiveByRedirect",
+            encryptedBody,
+            {
+                headers: {
+                    "Content-Type": "text/plain",
+                    "User-Agent": "Dalvik/2.1.0 (Linux; U; Android 9; SM-S908E Build/TP1A.220624.014)",
+                    "Host": "redirect.1spbgmu.com",
+                    "Connection": "Keep-Alive",
+                    "Accept-Encoding": "gzip"
+                },
+                timeout: 15000,
+                responseType: "arraybuffer"
+            }
+        );
+
+        const decryptedText = decryptAES(Buffer.from(response.data).toString("utf-8"));
+        console.log("Step 1 Response:", decryptedText.substring(0, 300));
+        
+        return JSON.parse(decryptedText);
+
+    } catch (error) {
+        console.error("Step 1 error:", error.message);
+        return null;
+    }
+}
+
+// الخطوة الثانية: استخراج الرابط النهائي من getLiveByDoubleRedirect
+async function step2_getLiveByDoubleRedirect(channelId, step1Response) {
+    try {
+        // استخدام الـ raw_data من الخطوة الأولى
+        const rawData = step1Response.raw_data || "";
+        
+        // استخدام الـ url من الخطوة الأولى
+        let urlData = step1Response.url || "";
+        if (step1Response.data && step1Response.data.url) {
+            urlData = step1Response.data.url;
+        }
+
+        const postData = {
+            "user_id": "_82668_1785761367217_notloggedin.com_dramalive3",
+            "device_id": "e603540e-ed93-47a3-bec6-a15f7f056604",
+            "device_api": "28",
+            "version_name": "187",
+            "language": "ar",
+            "timezone": "Europe/Istanbul",
+            "device_type": "phone",
+            "KEY_ACTIVATED_TYPE": "232425",
+            "store": "direct",
+            "isStoreVersion": false,
+            "isPremium": false,
+            "isCoupon_active": false,
+            "hideAds": false,
+            "appCount": "{\"adsFailed\":80,\"adsLoaded\":64,\"adsShowed\":22,\"runCount\":10}",
+            "mainServer": "http://main.eastgoessouth.online/api/live/livedrama/v13.0.0/",
+            "type": "tv",
+            "id": channelId,
+            "url": urlData,
+            "agent": "double_redirect",
+            "raw_data": rawData
+        };
+
+        console.log("Step 2 - Sending to getLiveByDoubleRedirect");
         
         const encryptedBody = encryptAES(JSON.stringify(postData));
 
@@ -115,21 +170,43 @@ async function extractStreamUrl(channelId, urlValue, agentType) {
         );
 
         const decryptedText = decryptAES(Buffer.from(response.data).toString("utf-8"));
-        console.log("Response:", decryptedText);
+        console.log("Step 2 Response:", decryptedText);
         
-        const jsonResponse = JSON.parse(decryptedText);
+        return JSON.parse(decryptedText);
+
+    } catch (error) {
+        console.error("Step 2 error:", error.message);
+        return null;
+    }
+}
+
+// الدالة الكاملة لاستخراج الرابط (الخطوتين معاً)
+async function extractStreamUrl(channelId, fakeUrl) {
+    try {
+        // الخطوة الأولى
+        const step1Result = await step1_getLiveByRedirect(channelId, fakeUrl);
+        if (!step1Result) {
+            return { stream_url: null, error: "Step 1 failed" };
+        }
+
+        // الخطوة الثانية
+        const step2Result = await step2_getLiveByDoubleRedirect(channelId, step1Result);
+        if (!step2Result) {
+            return { stream_url: null, error: "Step 2 failed" };
+        }
 
         let result = {
             stream_url: null,
             headers: {},
             agent: "ExoPlayer",
-            raw_response: jsonResponse
+            step1: step1Result,
+            step2: step2Result
         };
 
-        // استخراج الرابط من data.url
-        if (jsonResponse.data && jsonResponse.data.url) {
+        // استخراج الرابط النهائي من step2
+        if (step2Result.data && step2Result.data.url) {
             try {
-                const innerData = JSON.parse(jsonResponse.data.url);
+                const innerData = JSON.parse(step2Result.data.url);
                 result.stream_url = innerData.url || null;
                 if (innerData.headers) {
                     result.headers = innerData.headers;
@@ -138,13 +215,13 @@ async function extractStreamUrl(channelId, urlValue, agentType) {
                     result.agent = innerData.agent;
                 }
             } catch (e) {
-                result.stream_url = jsonResponse.data.url;
+                result.stream_url = step2Result.data.url;
             }
         }
 
         // البحث في raw_data عن window.atob
-        if (!result.stream_url && jsonResponse.raw_data) {
-            const atobMatches = jsonResponse.raw_data.match(/window\.atob\s*\(\s*['"]([A-Za-z0-9+/=]+)['"]\s*\)/g);
+        if (!result.stream_url && step2Result.raw_data) {
+            const atobMatches = step2Result.raw_data.match(/window\.atob\s*\(\s*['"]([A-Za-z0-9+/=]+)['"]\s*\)/g);
             if (atobMatches) {
                 for (let match of atobMatches) {
                     const base64Match = match.match(/['"]([A-Za-z0-9+/=]+)['"]/);
@@ -159,21 +236,13 @@ async function extractStreamUrl(channelId, urlValue, agentType) {
                     }
                 }
             }
-            
-            // البحث عن رابط m3u8 مباشر
-            if (!result.stream_url) {
-                const m3u8Match = jsonResponse.raw_data.match(/(https?:\/\/[^\s"'<>]+\.m3u8[^\s"'<>]*)/);
-                if (m3u8Match) {
-                    result.stream_url = m3u8Match[1];
-                }
-            }
         }
 
         return result;
 
     } catch (error) {
-        console.error("Error:", error.message);
-        return { error: true, message: error.message };
+        console.error("Extract error:", error.message);
+        return { stream_url: null, error: error.message };
     }
 }
 
@@ -305,7 +374,7 @@ app.get("/stream", async (req, res) => {
             };
 
             if (extract && (mainAgent === "redirect" || mainAgent === "double_redirect")) {
-                const resolved = await extractStreamUrl(id_live, mainUrl, mainAgent);
+                const resolved = await extractStreamUrl(id_live, mainUrl);
                 if (resolved.stream_url) {
                     streamObj.direct_url = resolved.stream_url;
                     streamObj.stream_headers = resolved.headers;
@@ -354,8 +423,8 @@ app.get("/stream", async (req, res) => {
                 }
 
                 if (extract && (agentData === "redirect" || agentData === "double_redirect")) {
-                    const urlToUse = agentData === "double_redirect" ? linkData : streamObj.url;
-                    const resolved = await extractStreamUrl(id_live, urlToUse, agentData);
+                    const urlToUse = streamObj.url;
+                    const resolved = await extractStreamUrl(id_live, urlToUse);
                     if (resolved.stream_url) {
                         streamObj.direct_url = resolved.stream_url;
                         streamObj.stream_headers = resolved.headers;
@@ -387,16 +456,15 @@ app.all("/extract", async (req, res) => {
     try {
         const channelId = req.query.id_live || req.body.id_live;
         const urlValue = req.query.url || req.body.url;
-        const agentType = req.query.agent || req.body.agent || "redirect";
         
         if (!channelId || !urlValue) {
             return res.status(400).json({
                 error: true,
-                message: "يرجى إرسال id_live و url و agent"
+                message: "يرجى إرسال id_live و url"
             });
         }
 
-        const result = await extractStreamUrl(channelId, urlValue, agentType);
+        const result = await extractStreamUrl(channelId, urlValue);
         res.json(result);
 
     } catch (error) {
