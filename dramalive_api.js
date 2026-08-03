@@ -34,98 +34,40 @@ function decryptAES(encryptedText) {
     return decrypted.toString(CryptoJS.enc.Utf8);
 }
 
-// الخطوة الأولى: استخراج الرابط من getLiveByRedirect
-async function step1_getLiveByRedirect(channelId, fakeUrl) {
-    try {
-        // تجهيز الرابط الوهمي
-        let urlData;
-        if (fakeUrl.includes("daddy_")) {
-            const daddyId = fakeUrl.match(/daddy_(\d+)/)?.[1] || "";
-            urlData = JSON.stringify({
-                "url": `https://hamis.romponalis.st/premiumtv/daddy4.php?id=${daddyId}`,
-                "data": "",
-                "acceptSSL": "1",
-                "iframe": `https://daddylive.mov/embed/embed.php?id=${daddyId}&player=1&source=tv.json`,
-                "headers": {
-                    "Referer": "https://dlhd.pk/"
-                }
-            });
-        } else {
-            urlData = JSON.stringify({
-                "url": fakeUrl,
-                "data": "",
-                "acceptSSL": "1",
-                "iframe": "",
-                "headers": {}
-            });
-        }
-
-        const postData = {
-            "user_id": "_82668_1785761367217_notloggedin.com_dramalive3",
-            "device_id": "e603540e-ed93-47a3-bec6-a15f7f056604",
-            "device_api": "28",
-            "version_name": "187",
-            "language": "ar",
-            "timezone": "Europe/Istanbul",
-            "device_type": "phone",
-            "KEY_ACTIVATED_TYPE": "232425",
-            "store": "direct",
-            "isStoreVersion": false,
-            "isPremium": false,
-            "isCoupon_active": false,
-            "hideAds": false,
-            "appCount": "{\"adsFailed\":80,\"adsLoaded\":64,\"adsShowed\":22,\"runCount\":10}",
-            "mainServer": "http://main.eastgoessouth.online/api/live/livedrama/v13.0.0/",
-            "type": "tv",
-            "id": channelId,
-            "url": urlData,
-            "agent": "double_redirect",
-            "raw_data": ""
-        };
-
-        console.log("Step 1 - Sending to getLiveByRedirect");
-        
-        const encryptedBody = encryptAES(JSON.stringify(postData));
-
-        const response = await axios.post(
-            "http://redirect.1spbgmu.com/redirect/getLiveByRedirect",
-            encryptedBody,
-            {
-                headers: {
-                    "Content-Type": "text/plain",
-                    "User-Agent": "Dalvik/2.1.0 (Linux; U; Android 9; SM-S908E Build/TP1A.220624.014)",
-                    "Host": "redirect.1spbgmu.com",
-                    "Connection": "Keep-Alive",
-                    "Accept-Encoding": "gzip"
-                },
-                timeout: 15000,
-                responseType: "arraybuffer"
+// تحويل الرابط الوهمي إلى JSON
+function convertFakeUrl(fakeUrl) {
+    if (fakeUrl.includes("daddy_")) {
+        const daddyId = fakeUrl.match(/daddy_(\d+)/)?.[1] || "";
+        return JSON.stringify({
+            "url": `https://hamis.romponalis.st/premiumtv/daddy4.php?id=${daddyId}`,
+            "data": "",
+            "acceptSSL": "1",
+            "iframe": `https://daddylive.mov/embed/embed.php?id=${daddyId}&player=1&source=tv.json`,
+            "headers": {
+                "Referer": "https://dlhd.pk/"
             }
-        );
-
-        const decryptedText = decryptAES(Buffer.from(response.data).toString("utf-8"));
-        console.log("Step 1 Response:", decryptedText.substring(0, 300));
-        
-        return JSON.parse(decryptedText);
-
-    } catch (error) {
-        console.error("Step 1 error:", error.message);
-        return null;
+        });
+    } else {
+        return JSON.stringify({
+            "url": fakeUrl,
+            "data": "",
+            "acceptSSL": "1",
+            "iframe": "",
+            "headers": {}
+        });
     }
 }
 
-// الخطوة الثانية: استخراج الرابط النهائي من getLiveByDoubleRedirect
-async function step2_getLiveByDoubleRedirect(channelId, step1Response) {
+// الدالة الكاملة لاستخراج الرابط (خطوة واحدة ببيانات التطبيق الأصلية)
+async function extractStreamUrl(channelId, fakeUrl) {
     try {
-        // استخدام الـ raw_data من الخطوة الأولى
-        const rawData = step1Response.raw_data || "";
-        
-        // استخدام الـ url من الخطوة الأولى
-        let urlData = step1Response.url || "";
-        if (step1Response.data && step1Response.data.url) {
-            urlData = step1Response.data.url;
-        }
+        // تجهيز الرابط الوهمي
+        const urlData = convertFakeUrl(fakeUrl);
 
+        // هذا هو الـ raw_data اللي التطبيق بيبعته (HTML كامل)
+        const rawData = `\r\n \n\n\n\n\n\n\n\n<html>\n<head>\n<title>91</title>\n\n<style>\nhtml, body {\n  margin: 0;\n  padding: 0;\n  height: 100%;\n  overflow: hidden;\n  background: black;\n}\n\n#player {\n  width: 100vw;\n  height: 100vh;\n}\n\n.container {\n  height: 100%;\n}\n</style>\n\n\n<script>(function(s){s.dataset.zone='10227946',s.src='https://llvpn.com/tag.min.js'})([document.documentElement, document.body].filter(Boolean).pop().appendChild(document.createElement('script')))</script>\n \n\n\n<script src="//cdn.jsdelivr.net/npm/@clappr/player@0.11.6/dist/clappr.min.js"></script>\n<script src="//cdn.jsdelivr.net/npm/clappr-pip@latest/dist/clappr-pip.min.js"></script>\n<script src="//cdn.jsdelivr.net/npm/@swarmcloud/hls/p2p-engine.min.js"></script>\n</head>\n\n<body class="container">\n\n<div id="player"></div>\n\n<script>\n(async () => {\n\n  const p2pConfig = {\n    live: true,\n    token: "greek",\n    channelId: "91",\n    announce: "https://ann.cdn-lab.shop/v1",\n    showSlogan: false,\n    sharePlaylist: false,\n    startFromSegmentOffset: 0,\n    trickleICE: true,\n  };\n\n\n\n  var player = new Clappr.Player({\n    source:window.atob('aHR0cHM6Ly94YW1lbGVvbi5waGFudGVtbGlzLnRvcC9mb3VyL3NlY3VyZS80OGFiMjhhZGQyMzI0NDk0ZmU2ZGM1NjE3ZTNkNTdkMC8xNzg1ODAxODUyL3ByZW1pdW05MS9pbmRleC5tM3U4'),\n    mediacontrol: { seekbar: "#FFFFFF", buttons: "#FFFFFF" },\n    mimeType: "application/x-mpegURL",\n    height: "100%",\n    width: "100%",\n    autoPlay: true,\n    mute: true,\n    plugins: [ClapprPip.PipButton, ClapprPip.PipPlugin],\n    playback: {\n      hlsjsConfig: {\n        maxBufferLength: 5,\n        liveSyncDurationCount: 3,\n      },\n    },\n  });\n\n  player.attachTo(document.getElementById("player"));\n  p2pConfig.hlsjsInstance = player.core.getCurrentPlayback()?._hls;\n  new P2PEngineHls(p2pConfig);\n\n})();\n</script>\n\n<div style="display:none;">\n  <script id="_waup77">\n    var _wau = _wau || [];\n    _wau.push(["classic", "ra5fzi2hwk", "p77"]);\n  </script>\n  <script async src="//waust.at/c.js"></script>\n</div>\n\n<script>\n    // disable right click\n    document.addEventListener('contextmenu', event => event.preventDefault());\n\n    document.onkeydown = function (e) {\n\n        // disable F12 key\n        if(e.keyCode == 123) {\n            return false;\n        }\n\n        // disable I key\n        if(e.ctrlKey && e.shiftKey && e.keyCode == 73){\n            return false;\n        }\n\n        // disable J key\n        if(e.ctrlKey && e.shiftKey && e.keyCode == 74) {\n            return false;\n        }\n\n        // disable U key\n        if(e.ctrlKey && e.keyCode == 85) {\n            return false;\n        }\n    }\n\n</script>\n\n\n\n\n  \n\n</body>\n</html>`;
+
+        // البيانات بالضبط زي ما التطبيق ببعتها
         const postData = {
             "user_id": "_82668_1785761367217_notloggedin.com_dramalive3",
             "device_id": "e603540e-ed93-47a3-bec6-a15f7f056604",
@@ -149,7 +91,7 @@ async function step2_getLiveByDoubleRedirect(channelId, step1Response) {
             "raw_data": rawData
         };
 
-        console.log("Step 2 - Sending to getLiveByDoubleRedirect");
+        console.log("Sending request with raw_data length:", rawData.length);
         
         const encryptedBody = encryptAES(JSON.stringify(postData));
 
@@ -170,43 +112,21 @@ async function step2_getLiveByDoubleRedirect(channelId, step1Response) {
         );
 
         const decryptedText = decryptAES(Buffer.from(response.data).toString("utf-8"));
-        console.log("Step 2 Response:", decryptedText);
+        console.log("Full response:", decryptedText);
         
-        return JSON.parse(decryptedText);
-
-    } catch (error) {
-        console.error("Step 2 error:", error.message);
-        return null;
-    }
-}
-
-// الدالة الكاملة لاستخراج الرابط (الخطوتين معاً)
-async function extractStreamUrl(channelId, fakeUrl) {
-    try {
-        // الخطوة الأولى
-        const step1Result = await step1_getLiveByRedirect(channelId, fakeUrl);
-        if (!step1Result) {
-            return { stream_url: null, error: "Step 1 failed" };
-        }
-
-        // الخطوة الثانية
-        const step2Result = await step2_getLiveByDoubleRedirect(channelId, step1Result);
-        if (!step2Result) {
-            return { stream_url: null, error: "Step 2 failed" };
-        }
+        const jsonResponse = JSON.parse(decryptedText);
 
         let result = {
             stream_url: null,
             headers: {},
             agent: "ExoPlayer",
-            step1: step1Result,
-            step2: step2Result
+            full_response: jsonResponse
         };
 
-        // استخراج الرابط النهائي من step2
-        if (step2Result.data && step2Result.data.url) {
+        // استخراج الرابط من data.url
+        if (jsonResponse.data && jsonResponse.data.url) {
             try {
-                const innerData = JSON.parse(step2Result.data.url);
+                const innerData = JSON.parse(jsonResponse.data.url);
                 result.stream_url = innerData.url || null;
                 if (innerData.headers) {
                     result.headers = innerData.headers;
@@ -215,13 +135,13 @@ async function extractStreamUrl(channelId, fakeUrl) {
                     result.agent = innerData.agent;
                 }
             } catch (e) {
-                result.stream_url = step2Result.data.url;
+                result.stream_url = jsonResponse.data.url;
             }
         }
 
         // البحث في raw_data عن window.atob
-        if (!result.stream_url && step2Result.raw_data) {
-            const atobMatches = step2Result.raw_data.match(/window\.atob\s*\(\s*['"]([A-Za-z0-9+/=]+)['"]\s*\)/g);
+        if (!result.stream_url && jsonResponse.raw_data) {
+            const atobMatches = jsonResponse.raw_data.match(/window\.atob\s*\(\s*['"]([A-Za-z0-9+/=]+)['"]\s*\)/g);
             if (atobMatches) {
                 for (let match of atobMatches) {
                     const base64Match = match.match(/['"]([A-Za-z0-9+/=]+)['"]/);
@@ -236,12 +156,19 @@ async function extractStreamUrl(channelId, fakeUrl) {
                     }
                 }
             }
+            
+            if (!result.stream_url) {
+                const m3u8Match = jsonResponse.raw_data.match(/(https?:\/\/[^\s"'<>]+\.m3u8[^\s"'<>]*)/);
+                if (m3u8Match) {
+                    result.stream_url = m3u8Match[1];
+                }
+            }
         }
 
         return result;
 
     } catch (error) {
-        console.error("Extract error:", error.message);
+        console.error("Error:", error.message);
         return { stream_url: null, error: error.message };
     }
 }
@@ -378,7 +305,6 @@ app.get("/stream", async (req, res) => {
                 if (resolved.stream_url) {
                     streamObj.direct_url = resolved.stream_url;
                     streamObj.stream_headers = resolved.headers;
-                    streamObj.stream_agent = resolved.agent;
                 }
             }
 
@@ -423,12 +349,10 @@ app.get("/stream", async (req, res) => {
                 }
 
                 if (extract && (agentData === "redirect" || agentData === "double_redirect")) {
-                    const urlToUse = streamObj.url;
-                    const resolved = await extractStreamUrl(id_live, urlToUse);
+                    const resolved = await extractStreamUrl(id_live, streamObj.url);
                     if (resolved.stream_url) {
                         streamObj.direct_url = resolved.stream_url;
                         streamObj.stream_headers = resolved.headers;
-                        streamObj.stream_agent = resolved.agent;
                     }
                 }
 
