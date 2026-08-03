@@ -129,7 +129,6 @@ async function resolveRedirectUrl(fakeUrl, customUserId, customDeviceId) {
 // ==========================================
 async function resolveDoubleRedirect(channelId, serverUrl) {
     try {
-        // تجهيز البيانات المرسلة
         const postData = {
             "user_id": "_82668_1785761367217_notloggedin.com_dramalive3",
             "device_id": "e603540e-ed93-47a3-bec6-a15f7f056604",
@@ -291,11 +290,11 @@ app.get("/channels", async (req, res) => {
     }
 });
 
-// 2. مسار جلب روابط البث للقناة (Stream) - تم تعديله لمعالجة double_redirect
+// 2. مسار جلب روابط البث للقناة (Stream)
 app.get("/stream", async (req, res) => {
     try {
         const id_live = req.query.id_live;
-        const resolveRedirects = req.query.resolve === "true"; // بارامتر اختياري لتفعيل حل الروابط
+        const showRaw = req.query.raw === "true"; // لعرض البيانات الخام
         
         if (!id_live) return res.status(400).json({ error: true, message: "يرجى إرسال id_live" });
 
@@ -340,6 +339,12 @@ app.get("/stream", async (req, res) => {
         );
 
         const decryptedResponse = decryptAES(Buffer.from(response.data).toString("utf-8"));
+        
+        // لو طلب raw=true، رجع البيانات الأصلية
+        if (showRaw) {
+            return res.json(JSON.parse(decryptedResponse));
+        }
+        
         const rawJson = JSON.parse(decryptedResponse);
         const liveData = rawJson.live || {};
 
@@ -350,24 +355,13 @@ app.get("/stream", async (req, res) => {
         const mainAgent = liveData.agent || "";
         
         if (mainUrl && mainUrl !== "empty") {
-            if (mainAgent === "double_redirect" && resolveRedirects) {
-                // معالجة سيرفر double_redirect
-                const resolvedMain = await resolveDoubleRedirect(id_live, mainUrl);
-                parsedStreams.push({
-                    server_name: "السيرفر الأساسي (محلول)",
-                    url: resolvedMain.stream_url || mainUrl,
-                    agent: resolvedMain.agent || "ExoPlayer",
-                    headers: resolvedMain.headers || {},
-                    drm: null
-                });
-            } else {
-                parsedStreams.push({
-                    server_name: "السيرفر الأساسي",
-                    url: mainUrl,
-                    agent: mainAgent || "ExoPlayer",
-                    drm: null
-                });
-            }
+            parsedStreams.push({
+                server_name: "السيرفر الأساسي",
+                url: mainUrl,
+                agent: mainAgent || "ExoPlayer",
+                drm: null,
+                raw_agent: mainAgent
+            });
         }
 
         // معالجة السيرفرات الاحتياطية
@@ -390,7 +384,8 @@ app.get("/stream", async (req, res) => {
                     url: "",
                     agent: agentData,
                     drm: null,
-                    headers: {}
+                    headers: {},
+                    raw_link: linkData
                 };
 
                 // محاولة parsing الرابط كـ JSON
@@ -411,21 +406,6 @@ app.get("/stream", async (req, res) => {
                     streamObj.url = linkData;
                 }
 
-                // إذا كان السيرفر من نوع double_redirect ونريد حله
-                if (streamObj.agent === "double_redirect" && resolveRedirects) {
-                    try {
-                        const resolved = await resolveDoubleRedirect(id_live, streamObj.url);
-                        if (resolved.stream_url) {
-                            streamObj.url = resolved.stream_url;
-                            streamObj.agent = resolved.agent || streamObj.agent;
-                            streamObj.headers = resolved.headers || streamObj.headers;
-                            streamObj.server_name += " (محلول)";
-                        }
-                    } catch (err) {
-                        console.error(`Failed to resolve backup server ${i}:`, err.message);
-                    }
-                }
-
                 if (streamObj.url) {
                     parsedStreams.push(streamObj);
                 }
@@ -444,7 +424,26 @@ app.get("/stream", async (req, res) => {
     }
 });
 
-// 3. مسار جديد: استخراج رابط مباشر من سيرفر double_redirect
+// 3. مسار استخراج الرابط النهائي
+app.all("/resolve", async (req, res) => {
+    try {
+        const targetUrl = req.query.url || req.body.url; 
+        const customUserId = req.query.user_id || req.body.user_id;
+        const customDeviceId = req.query.device_id || req.body.device_id;
+        
+        if (!targetUrl) {
+            return res.status(400).json({ error: true, message: "يرجى إرسال الرابط (url) المراد استخراجه" });
+        }
+
+        const result = await resolveRedirectUrl(targetUrl, customUserId, customDeviceId);
+        res.json(result);
+
+    } catch (error) {
+        res.status(500).json({ error: true, message: error.message });
+    }
+});
+
+// 4. مسار استخراج رابط من سيرفر double_redirect
 app.all("/resolve-double", async (req, res) => {
     try {
         const channelId = req.query.id_live || req.body.id_live;
@@ -458,25 +457,6 @@ app.all("/resolve-double", async (req, res) => {
         }
 
         const result = await resolveDoubleRedirect(channelId, serverUrl);
-        res.json(result);
-
-    } catch (error) {
-        res.status(500).json({ error: true, message: error.message });
-    }
-});
-
-// 4. مسار استخراج الرابط النهائي (القديم)
-app.all("/resolve", async (req, res) => {
-    try {
-        const targetUrl = req.query.url || req.body.url; 
-        const customUserId = req.query.user_id || req.body.user_id;
-        const customDeviceId = req.query.device_id || req.body.device_id;
-        
-        if (!targetUrl) {
-            return res.status(400).json({ error: true, message: "يرجى إرسال الرابط (url) المراد استخراجه" });
-        }
-
-        const result = await resolveRedirectUrl(targetUrl, customUserId, customDeviceId);
         res.json(result);
 
     } catch (error) {
