@@ -5,10 +5,11 @@ const CryptoJS = require("crypto-js");
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-// --- إعدادات التشفير ---
+// مفاتيح التشفير الثابتة
 const KEY = CryptoJS.enc.Utf8.parse("0123456789abcdef");
 const IV = CryptoJS.enc.Utf8.parse("fedcba9876543210");
 
+// دالة التشفير
 function encryptAES(data) {
     const encrypted = CryptoJS.AES.encrypt(data, KEY, {
         iv: IV,
@@ -18,6 +19,7 @@ function encryptAES(data) {
     return encrypted.toString() + ":" + CryptoJS.enc.Base64.stringify(IV);
 }
 
+// دالة فك التشفير
 function decryptAES(encryptedText) {
     encryptedText = encryptedText.trim();
     const lastColon = encryptedText.lastIndexOf(":");
@@ -32,73 +34,70 @@ function decryptAES(encryptedText) {
     return decrypted.toString(CryptoJS.enc.Utf8);
 }
 
-// --- دالة توحيد هيكل القنوات ---
-function mapChannel(item) {
-    return {
-        "type": item.type || "tv",
-        "id_live": item.id_live || "",
-        "name": item.name || "Unknown",
-        "url": item.url || "1",
-        "agent": item.agent || "all_streams_redirect",
-        "backup": item.backup || "",
-        "img_url": item.img_url || "",
-        "id_topic": item.id_topic || ""
-    };
-}
-
-// --- دالة توحيد هيكل البث (تحويل السلاسل المعقدة إلى مصفوفة نظيفة) ---
-function mapStream(liveData) {
-    const sources = [];
-
-    // 1. إضافة الرابط الأساسي إذا كان موجوداً
-    if (liveData.url && liveData.url !== "1") {
-        sources.push({ url: liveData.url, agent: liveData.agent || "Mozilla", type: "primary" });
-    }
-
-    // 2. معالجة الـ backup المعقد (الذي يأتي كسلسلة نصية مفصولة بـ -;-)
-    if (liveData.backup) {
-        const parts = liveData.backup.split("-;-");
-        parts.forEach(part => {
-            const trimmed = part.trim();
-            if (!trimmed) return;
-
-            // إذا كان الرابط هو JSON
-            if (trimmed.startsWith("{")) {
-                try {
-                    const parsed = JSON.parse(trimmed);
-                    sources.push({ url: parsed.url, agent: parsed.agent || "Mozilla", type: "backup" });
-                } catch (e) { sources.push({ url: trimmed, agent: "Mozilla", type: "backup" }); }
-            } 
-            // إذا كان رابط عادي
-            else if (trimmed.includes("http")) {
-                sources.push({ url: trimmed, agent: "Mozilla", type: "backup" });
-            }
-        });
-    }
-
-    return {
-        id_live: liveData.id_live,
-        name: liveData.name,
-        sources: sources // مصفوفة نظيفة لكل الروابط المتاحة
-    };
-}
-
-// --- المسارات ---
-
-// 1. مسار جلب القنوات
+// 1. مسار جلب القنوات حسب القسم (Topic)
 app.get("/channels", async (req, res) => {
     try {
         const topic = req.query.topic || "arabic_sport";
-        // ... (كود الـ postData كما هو)
-        const postData = { /* ضع نفس الـ JSON الخاص بك هنا */ "topic": topic, "type": "tv", "user_id": "_19449_1785337989457_notloggedin.com_dramalive3", "device_id": "dde6f748-9857-4140-b133-4ccfaeb015fe" }; 
+        const postData = {
+            "user_id": "_19449_1785337989457_notloggedin.com_dramalive3",
+            "device_id": "dde6f748-9857-4140-b133-4ccfaeb015fe",
+            "device_api": "28",
+            "version_name": "187",
+            "language": "ar",
+            "timezone": "Europe/Istanbul",
+            "device_type": "phone",
+            "KEY_ACTIVATED_TYPE": "232425",
+            "store": "direct",
+            "isStoreVersion": false,
+            "isPremium": false,
+            "isCoupon_active": false,
+            "hideAds": false,
+            "appCount": "{\"adsFailed\":122,\"adsLoaded\":76,\"adsShowed\":29,\"runCount\":12}",
+            "mainServer": "http://main.backendcoreapi.com/api/live/livedrama/v13.0.0/",
+            "type": "tv",
+            "topic": topic
+        };
 
         const encryptedBody = encryptAES(JSON.stringify(postData));
-        const response = await axios.post("http://live.1spbgmu.com/api/live/livedrama/v13.0.0/getLiveByTopic", encryptedBody, { headers: { "Content-Type": "text/plain" } });
+
+        const response = await axios.post(
+            "http://live.1spbgmu.com/api/live/livedrama/v13.0.0/getLiveByTopic",
+            encryptedBody,
+            {
+                headers: {
+                    "Content-Type": "text/plain",
+                    "User-Agent": "Dalvik/2.1.0 (Linux; U; Android 9; SM-S908E Build/TP1A.220624.014)",
+                    "Host": "live.1spbgmu.com",
+                    "Connection": "Keep-Alive"
+                },
+                timeout: 30000
+            }
+        );
+
+        const jsonResponse = JSON.parse(decryptAES(response.data));
         
-        const data = JSON.parse(decryptAES(response.data));
-        
-        // تحويل البيانات للهيكل الثابت
-        const formattedChannels = (data.live || []).map(mapChannel);
+        // استخراج مصفوفة القنوات (في حال كان الرد يحتوي على القنوات مباشرة أو داخل كائن)
+        let rawChannels = [];
+        if (Array.isArray(jsonResponse)) {
+            rawChannels = jsonResponse;
+        } else if (jsonResponse.channels) {
+            rawChannels = jsonResponse.channels;
+        } else if (jsonResponse.live) {
+            rawChannels = jsonResponse.live;
+        }
+
+        // بناء الهيكل الثابت الذي طلبته
+        const formattedChannels = rawChannels.map(ch => ({
+            type: ch.type || "tv",
+            id_live: ch.id_live || "",
+            name: ch.name || "",
+            url: ch.url || "",
+            agent: ch.agent || "",
+            backup: ch.backup || "",
+            img_url: ch.img_url || "",
+            id_topic: ch.id_topic || topic
+        }));
+
         res.json(formattedChannels);
 
     } catch (error) {
@@ -106,24 +105,155 @@ app.get("/channels", async (req, res) => {
     }
 });
 
-// 2. مسار جلب البث
+// 2. مسار جلب روابط البث للقناة (Stream) بشكل ذكي
 app.get("/stream", async (req, res) => {
     try {
         const id_live = req.query.id_live;
-        const postData = { /* ضع نفس الـ JSON الخاص بك هنا */ "id_live": id_live, "type": "tv", "user_id": "_19449_1785337989457_notloggedin.com_dramalive3" };
+        if (!id_live) return res.status(400).json({ error: true, message: "يرجى إرسال id_live" });
+
+        const postData = {
+            "user_id": "_19449_1785337989457_notloggedin.com_dramalive3",
+            "device_id": "dde6f748-9857-4140-b133-4ccfaeb015fe",
+            "device_api": "28",
+            "version_name": "187",
+            "language": "ar",
+            "timezone": "Europe/Istanbul",
+            "device_type": "phone",
+            "KEY_ACTIVATED_TYPE": "232425",
+            "store": "direct",
+            "isStoreVersion": false,
+            "isPremium": false,
+            "isCoupon_active": false,
+            "hideAds": false,
+            "appCount": "{\"adsFailed\":122,\"adsLoaded\":76,\"adsShowed\":29,\"runCount\":12}",
+            "mainServer": "http://main.backendcoreapi.com/api/live/livedrama/v13.0.0/",
+            "type": "tv",
+            "id_live": id_live,
+            "id": id_live,
+            "live_id": id_live,
+            "channel_id": id_live
+        };
 
         const encryptedBody = encryptAES(JSON.stringify(postData));
-        const response = await axios.post("http://live.1spbgmu.com/api/live/livedrama/v13.0.0/getLiveAllStreamsById", encryptedBody, { headers: { "Content-Type": "text/plain" }, responseType: "arraybuffer" });
 
-        const data = JSON.parse(decryptAES(Buffer.from(response.data).toString("utf-8")));
-        
-        // تحويل البيانات لهيكل ذكي
-        const formattedStream = mapStream(data.live);
-        res.json(formattedStream);
+        const response = await axios.post(
+            "http://live.1spbgmu.com/api/live/livedrama/v13.0.0/getLiveAllStreamsById",
+            encryptedBody,
+            {
+                headers: {
+                    "Content-Type": "text/plain",
+                    "User-Agent": "Dalvik/2.1.0 (Linux; U; Android 9; SM-S908E Build/TP1A.220624.014)",
+                    "Host": "live.1spbgmu.com",
+                    "Connection": "Keep-Alive"
+                },
+                timeout: 30000,
+                responseType: "arraybuffer"
+            }
+        );
+
+        const decryptedResponse = decryptAES(Buffer.from(response.data).toString("utf-8"));
+        const rawJson = JSON.parse(decryptedResponse);
+        const liveData = rawJson.live || {};
+
+        let parsedStreams = [];
+
+        // 1. فحص الرابط الأساسي (url)
+        const mainUrl = liveData.url || "";
+        // نتأكد أن الرابط حقيقي وليس رابط وهمي للمشغل الداخلي
+        if (mainUrl.startsWith("http") && !mainUrl.includes(".LS.V2live")) {
+            parsedStreams.push({
+                server_name: "السيرفر الأساسي",
+                url: mainUrl,
+                agent: liveData.agent || "ExoPlayer",
+                drm: null
+            });
+        }
+
+        // 2. فحص وتفكيك الروابط الاحتياطية (backup)
+        const backupStr = liveData.backup || "";
+        if (backupStr) {
+            // فصل السيرفرات المتعددة باستخدام الفاصل -;-
+            const parts = backupStr.split("-;-");
+            
+            parts.forEach((part, index) => {
+                part = part.trim();
+                if (!part) return;
+
+                // فصل الرابط عن الـ Agent باستخدام الفاصل --
+                const subParts = part.split("--");
+                const linkData = subParts[0] ? subParts[0].trim() : "";
+                let agentData = subParts[1] ? subParts[1].trim() : "ExoPlayer";
+
+                if (!linkData) return;
+
+                let streamObj = {
+                    server_name: `سيرفر ${parsedStreams.length + 1}`,
+                    url: "",
+                    agent: agentData,
+                    drm: null
+                };
+
+                // فحص إذا كان الرابط عبارة عن كائن JSON (مثل الروابط التي تتطلب DRM)
+                if (linkData.startsWith("{") && linkData.endsWith("}")) {
+                    try {
+                        const jsonObj = JSON.parse(linkData);
+                        streamObj.url = jsonObj.url || "";
+                        
+                        // سحب الـ User-Agent إذا كان مدمجاً داخل الـ JSON
+                        if (jsonObj.agent) streamObj.agent = jsonObj.agent;
+                        if (jsonObj.headers && jsonObj.headers["User-Agent"]) {
+                            streamObj.agent = jsonObj.headers["User-Agent"];
+                        }
+                        
+                        // سحب مفاتيح التشفير DRM إن وجدت (مهم جداً لتشغيل بعض القنوات على ExoPlayer)
+                        if (jsonObj.drm) {
+                            streamObj.drm = jsonObj.drm;
+                        }
+                    } catch (e) {
+                        // في حال فشل التحليل، نعتبره خطأ ونتجاهله
+                    }
+                } else {
+                    // إذا كان الرابط عادياً وليس JSON
+                    streamObj.url = linkData;
+                }
+
+                // إضافة الرابط للمصفوفة فقط إذا كان يبدأ بـ http (لضمان صحته)
+                if (streamObj.url.startsWith("http")) {
+                    parsedStreams.push(streamObj);
+                }
+            });
+        }
+
+        // 3. بناء الهيكل الذكي والنهائي للمشغل
+        const finalResponse = {
+            id_live: liveData.id_live || id_live,
+            name: liveData.name || "",
+            img_url: liveData.img_url || "",
+            streams: parsedStreams // هذه المصفوفة تحتوي على جميع الروابط نظيفة وجاهزة
+        };
+
+        res.json(finalResponse);
 
     } catch (error) {
         res.status(500).json({ error: true, message: error.message });
     }
 });
 
-app.listen(PORT, () => console.log("Server running on port " + PORT));
+// قائمة الأقسام الكاملة
+const allTopics = [
+    {"id_topic":"hot_now","name_topic":"الأكثر مشاهدة"},
+    {"id_topic":"live_matches","name_topic":"مباريات مباشرة"},
+    {"id_topic":"alwan","name_topic":"الوان"},
+    {"id_topic":"shahid","name_topic":"شاهد"},
+    {"id_topic":"arabic_sport","name_topic":"رياضة"},
+    {"id_topic":"ar_1","name_topic":"ترفيه عربي"},
+    // ... (باقي الأقسام كما هي في كودك)
+];
+
+app.get("/get-all-topics", (req, res) => {
+    res.json(allTopics);
+});
+
+app.listen(PORT, () => {
+    console.log("Server is running on port " + PORT);
+});
