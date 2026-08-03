@@ -5,6 +5,10 @@ const CryptoJS = require("crypto-js");
 const app = express();
 const PORT = process.env.PORT || 3000;
 
+// السماح بقراءة البيانات المرسلة بصيغة JSON (مهم للمسار الجديد)
+app.use(express.json());
+app.use(express.urlencoded({ extended: true }));
+
 // مفاتيح التشفير الثابتة
 const KEY = CryptoJS.enc.Utf8.parse("0123456789abcdef");
 const IV = CryptoJS.enc.Utf8.parse("fedcba9876543210");
@@ -32,6 +36,64 @@ function decryptAES(encryptedText) {
         padding: CryptoJS.pad.Pkcs7
     });
     return decrypted.toString(CryptoJS.enc.Utf8);
+}
+
+// ==========================================
+// دالة جديدة: فك الرابط الوهمي (Double Redirect)
+// ==========================================
+async function resolveRedirectUrl(fakeUrl) {
+    try {
+        const postData = {
+            "user_id": "_19449_1785337989457_notloggedin.com_dramalive3",
+            "device_id": "dde6f748-9857-4140-b133-4ccfaeb015fe",
+            "device_api": "28",
+            "version_name": "187",
+            "language": "ar",
+            "timezone": "Europe/Istanbul",
+            "device_type": "phone",
+            "KEY_ACTIVATED_TYPE": "232425",
+            "store": "direct",
+            "mainServer": "http://main.backendcoreapi.com/api/live/livedrama/v13.0.0/",
+            "type": "tv",
+            "url": fakeUrl,
+            "link": fakeUrl
+        };
+
+        const encryptedBody = encryptAES(JSON.stringify(postData));
+
+        const response = await axios.post(
+            "http://redirect.1spbgmu.com/redirect/getLiveByDoubleRedirect",
+            encryptedBody,
+            {
+                headers: {
+                    "Content-Type": "text/plain",
+                    "User-Agent": "Dalvik/2.1.0 (Linux; U; Android 9; SM-S908E Build/TP1A.220624.014)",
+                    "Host": "redirect.1spbgmu.com",
+                    "Connection": "Keep-Alive"
+                },
+                timeout: 15000
+            }
+        );
+
+        const decryptedResponse = decryptAES(response.data);
+        const jsonResponse = JSON.parse(decryptedResponse);
+
+        if (jsonResponse.result === 0 && jsonResponse.data && jsonResponse.data.url) {
+            let finalStreamData;
+            try {
+                // محاولة تحويل الرابط الداخلي إذا كان بصيغة JSON (يحتوي على headers)
+                finalStreamData = JSON.parse(jsonResponse.data.url);
+            } catch (e) {
+                // إذا كان الرابط نصياً عادياً
+                finalStreamData = { url: jsonResponse.data.url, agent: jsonResponse.data.agent };
+            }
+            return finalStreamData;
+        }
+        return null;
+    } catch (error) {
+        console.error("Error resolving redirect:", error.message);
+        return null;
+    }
 }
 
 // 1. مسار جلب القنوات حسب القسم (Topic)
@@ -76,7 +138,6 @@ app.get("/channels", async (req, res) => {
 
         const jsonResponse = JSON.parse(decryptAES(response.data));
         
-        // استخراج مصفوفة القنوات (في حال كان الرد يحتوي على القنوات مباشرة أو داخل كائن)
         let rawChannels = [];
         if (Array.isArray(jsonResponse)) {
             rawChannels = jsonResponse;
@@ -86,7 +147,6 @@ app.get("/channels", async (req, res) => {
             rawChannels = jsonResponse.live;
         }
 
-        // بناء الهيكل الثابت الذي طلبته
         const formattedChannels = rawChannels.map(ch => ({
             type: ch.type || "tv",
             id_live: ch.id_live || "",
@@ -105,7 +165,7 @@ app.get("/channels", async (req, res) => {
     }
 });
 
-// 2. مسار جلب روابط البث للقناة (Stream) بشكل ذكي
+// 2. مسار جلب روابط البث للقناة (Stream)
 app.get("/stream", async (req, res) => {
     try {
         const id_live = req.query.id_live;
@@ -157,9 +217,8 @@ app.get("/stream", async (req, res) => {
 
         let parsedStreams = [];
 
-        // 1. فحص الرابط الأساسي (url)
+        // السيرفر الأساسي
         const mainUrl = liveData.url || "";
-        // نتأكد أن الرابط حقيقي وليس رابط وهمي للمشغل الداخلي
         if (mainUrl.startsWith("http") && !mainUrl.includes(".LS.V2live")) {
             parsedStreams.push({
                 server_name: "السيرفر الأساسي",
@@ -169,17 +228,14 @@ app.get("/stream", async (req, res) => {
             });
         }
 
-        // 2. فحص وتفكيك الروابط الاحتياطية (backup)
+        // السيرفرات الاحتياطية
         const backupStr = liveData.backup || "";
         if (backupStr) {
-            // فصل السيرفرات المتعددة باستخدام الفاصل -;-
             const parts = backupStr.split("-;-");
-            
             parts.forEach((part, index) => {
                 part = part.trim();
                 if (!part) return;
 
-                // فصل الرابط عن الـ Agent باستخدام الفاصل --
                 const subParts = part.split("--");
                 const linkData = subParts[0] ? subParts[0].trim() : "";
                 let agentData = subParts[1] ? subParts[1].trim() : "ExoPlayer";
@@ -193,43 +249,35 @@ app.get("/stream", async (req, res) => {
                     drm: null
                 };
 
-                // فحص إذا كان الرابط عبارة عن كائن JSON (مثل الروابط التي تتطلب DRM)
                 if (linkData.startsWith("{") && linkData.endsWith("}")) {
                     try {
                         const jsonObj = JSON.parse(linkData);
                         streamObj.url = jsonObj.url || "";
-                        
-                        // سحب الـ User-Agent إذا كان مدمجاً داخل الـ JSON
                         if (jsonObj.agent) streamObj.agent = jsonObj.agent;
                         if (jsonObj.headers && jsonObj.headers["User-Agent"]) {
                             streamObj.agent = jsonObj.headers["User-Agent"];
                         }
-                        
-                        // سحب مفاتيح التشفير DRM إن وجدت (مهم جداً لتشغيل بعض القنوات على ExoPlayer)
                         if (jsonObj.drm) {
                             streamObj.drm = jsonObj.drm;
                         }
                     } catch (e) {
-                        // في حال فشل التحليل، نعتبره خطأ ونتجاهله
+                        // تجاهل الخطأ
                     }
                 } else {
-                    // إذا كان الرابط عادياً وليس JSON
                     streamObj.url = linkData;
                 }
 
-                // إضافة الرابط للمصفوفة فقط إذا كان يبدأ بـ http (لضمان صحته)
                 if (streamObj.url.startsWith("http")) {
                     parsedStreams.push(streamObj);
                 }
             });
         }
 
-        // 3. بناء الهيكل الذكي والنهائي للمشغل
         const finalResponse = {
             id_live: liveData.id_live || id_live,
             name: liveData.name || "",
             img_url: liveData.img_url || "",
-            streams: parsedStreams // هذه المصفوفة تحتوي على جميع الروابط نظيفة وجاهزة
+            streams: parsedStreams
         };
 
         res.json(finalResponse);
@@ -239,7 +287,41 @@ app.get("/stream", async (req, res) => {
     }
 });
 
-// قائمة جميع الأقسام الكاملة (81 قسم مع الصور)
+// ==========================================
+// 3. مسار جديد: استخراج الرابط الحقيقي (Resolve)
+// يقبل الطلبات بصيغة GET أو POST
+// ==========================================
+app.all("/resolve", async (req, res) => {
+    try {
+        // قراءة الرابط سواء تم إرساله كـ Query Parameter أو داخل الـ Body
+        const targetUrl = req.query.url || req.body.url; 
+        
+        if (!targetUrl) {
+            return res.status(400).json({ error: true, message: "يرجى إرسال الرابط (url) المراد استخراجه" });
+        }
+
+        const realStreamData = await resolveRedirectUrl(targetUrl);
+
+        if (realStreamData && realStreamData.url) {
+            const finalResponse = {
+                error: false,
+                play_url: realStreamData.url,
+                agent: realStreamData.agent || "ExoPlayer",
+                headers: realStreamData.headers || null,
+                media_type: realStreamData.mediatype || "hls"
+            };
+
+            res.json(finalResponse);
+        } else {
+            res.status(404).json({ error: true, message: "فشل استخراج الرابط الحقيقي أو السيرفر متوقف" });
+        }
+
+    } catch (error) {
+        res.status(500).json({ error: true, message: error.message });
+    }
+});
+
+// قائمة الأقسام
 const allTopics = [
     {"id_topic":"hot_now","name_topic":"الأكثر مشاهدة","img_url_topic":"http://logo.twoapistack.work/img/topics/hot_now.png","code":""},
     {"id_topic":"live_matches","name_topic":"مباريات مباشرة","img_url_topic":"http://logo.twoapistack.work/img/topics/ic_fire.jpg","code":""},
@@ -286,46 +368,9 @@ const allTopics = [
     {"id_topic":"212","name_topic":"المغرب","img_url_topic":"http://logo.twoapistack.work/img/topics/ic_flag_ma.png","code":"ma"},
     {"id_topic":"213","name_topic":"الجزائر","img_url_topic":"http://logo.twoapistack.work/img/topics/ic_flag_dz.png","code":"dz"},
     {"id_topic":"218","name_topic":"ليبيا","img_url_topic":"http://logo.twoapistack.work/img/topics/ic_flag_ly.png","code":"ly"},
-    {"id_topic":"252","name_topic":"الصومال","img_url_topic":"http://logo.twoapistack.work/img/topics/ic_flag_so.png","code":"so"},
-    {"id_topic":"355","name_topic":"Albania","img_url_topic":"http://logo.twoapistack.work/img/topics/ic_flag_al.png","code":"al"},
-    {"id_topic":"93","name_topic":"Afghanistan","img_url_topic":"http://logo.twoapistack.work/img/topics/ic_flag_af.png","code":"af"},
-    {"id_topic":"376","name_topic":"Andorra","img_url_topic":"http://logo.twoapistack.work/img/topics/ic_flag_ad.png","code":"ad"},
-    {"id_topic":"54","name_topic":"Argentina","img_url_topic":"http://logo.twoapistack.work/img/topics/ic_flag_ar.png","code":"ar"},
-    {"id_topic":"374","name_topic":"Armenia","img_url_topic":"http://logo.twoapistack.work/img/topics/ic_flag_am.png","code":"am"},
-    {"id_topic":"297","name_topic":"Aruba","img_url_topic":"http://logo.twoapistack.work/img/topics/ic_flag_aw.png","code":"aw"},
-    {"id_topic":"61","name_topic":"Australia","img_url_topic":"http://logo.twoapistack.work/img/topics/ic_flag_au.png","code":"au"},
-    {"id_topic":"az","name_topic":"Azerbaijan","img_url_topic":"http://logo.twoapistack.work/img/topics/ic_flag_az.png","code":"az"},
-    {"id_topic":"bs","name_topic":"Bahamas","img_url_topic":"http://logo.twoapistack.work/img/topics/ic_flag_bs.png","code":"bs"},
-    {"id_topic":"bd","name_topic":"Bangladesh","img_url_topic":"http://logo.twoapistack.work/img/topics/ic_flag_bd.png","code":"bd"},
-    {"id_topic":"bb","name_topic":"Barbados","img_url_topic":"http://logo.twoapistack.work/img/topics/ic_flag_bb.png","code":"bb"},
-    {"id_topic":"by","name_topic":"Belarus","img_url_topic":"http://logo.twoapistack.work/img/topics/ic_flag_by.png","code":"by"},
-    {"id_topic":"0_be_0","name_topic":"Belgium","img_url_topic":"http://logo.twoapistack.work/img/topics/ic_flag_be.png","code":"be"},
-    {"id_topic":"bz","name_topic":"Belize","img_url_topic":"http://logo.twoapistack.work/img/topics/ic_flag_bz.png","code":"bz"},
-    {"id_topic":"bj","name_topic":"Benin","img_url_topic":"http://logo.twoapistack.work/img/topics/ic_flag_bj.png","code":"bj"},
-    {"id_topic":"bm","name_topic":"Bermuda","img_url_topic":"http://logo.twoapistack.work/img/topics/ic_flag_bm.png","code":"bm"},
-    {"id_topic":"bt","name_topic":"Bhutan","img_url_topic":"http://logo.twoapistack.work/img/topics/ic_flag_bt.png","code":"bt"},
-    {"id_topic":"bo","name_topic":"Bolivia","img_url_topic":"http://logo.twoapistack.work/img/topics/ic_flag_bo.png","code":"bo"},
-    {"id_topic":"ba","name_topic":"Bosnia And Herzegovina","img_url_topic":"http://logo.twoapistack.work/img/topics/ic_flag_ba.png","code":"ba"},
-    {"id_topic":"bw","name_topic":"Botswana","img_url_topic":"http://logo.twoapistack.work/img/topics/ic_flag_bw.png","code":"bw"},
-    {"id_topic":"bv","name_topic":"Bouvet Island","img_url_topic":"http://logo.twoapistack.work/img/topics/ic_flag_bv.png","code":"bv"},
-    {"id_topic":"br","name_topic":"Brazil","img_url_topic":"http://logo.twoapistack.work/img/topics/ic_flag_br.png","code":"br"},
-    {"id_topic":"io","name_topic":"British Indian Ocean Territory","img_url_topic":"http://logo.twoapistack.work/img/topics/ic_flag_io.png","code":"io"},
-    {"id_topic":"bn","name_topic":"Brunei Darussalam","img_url_topic":"http://logo.twoapistack.work/img/topics/ic_flag_bn.png","code":"bn"},
-    {"id_topic":"bg","name_topic":"Bulgaria","img_url_topic":"http://logo.twoapistack.work/img/topics/ic_flag_bg.png","code":"bg"},
-    {"id_topic":"bf","name_topic":"Burkina Faso","img_url_topic":"http://logo.twoapistack.work/img/topics/ic_flag_bf.png","code":"bf"},
-    {"id_topic":"0_bi_0","name_topic":"Burundi","img_url_topic":"http://logo.twoapistack.work/img/topics/ic_flag_bi.png","code":"bi"},
-    {"id_topic":"kh","name_topic":"Cambodia","img_url_topic":"http://logo.twoapistack.work/img/topics/ic_flag_kh.png","code":"kh"},
-    {"id_topic":"cm","name_topic":"Cameroon","img_url_topic":"http://logo.twoapistack.work/img/topics/ic_flag_cm.png","code":"cm"},
-    {"id_topic":"ca","name_topic":"Canada","img_url_topic":"http://logo.twoapistack.work/img/topics/ic_flag_ca.png","code":"ca"},
-    {"id_topic":"cv","name_topic":"Cape Verde","img_url_topic":"http://logo.twoapistack.work/img/topics/ic_flag_cv.png","code":"cv"},
-    {"id_topic":"ky","name_topic":"Cayman Islands","img_url_topic":"http://logo.twoapistack.work/img/topics/ic_flag_ky.png","code":"ky"},
-    {"id_topic":"cf","name_topic":"Central African Republic","img_url_topic":"http://logo.twoapistack.work/img/topics/ic_flag_cf.png","code":"cf"},
-    {"id_topic":"td","name_topic":"Chad","img_url_topic":"http://logo.twoapistack.work/img/topics/ic_flag_td.png","code":"td"},
-    {"id_topic":"cl","name_topic":"Chile","img_url_topic":"http://logo.twoapistack.work/img/topics/ic_flag_cl.png","code":"cl"},
-    {"id_topic":"cn","name_topic":"China","img_url_topic":"http://logo.twoapistack.work/img/topics/ic_flag_cn.png","code":"cn"}
+    {"id_topic":"252","name_topic":"الصومال","img_url_topic":"http://logo.twoapistack.work/img/topics/ic_flag_so.png","code":"so"}
 ];
 
-// مسار جلب القائمة الكاملة للأقسام
 app.get("/get-all-topics", (req, res) => {
     res.json(allTopics);
 });
