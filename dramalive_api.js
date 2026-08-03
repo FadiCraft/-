@@ -34,7 +34,6 @@ function decryptAES(encryptedText) {
     return decrypted.toString(CryptoJS.enc.Utf8);
 }
 
-// تحويل الرابط الوهمي إلى JSON
 function convertFakeUrl(fakeUrl) {
     if (fakeUrl.includes("daddy_")) {
         const daddyId = fakeUrl.match(/daddy_(\d+)/)?.[1] || "";
@@ -47,7 +46,32 @@ function convertFakeUrl(fakeUrl) {
                 "Referer": "https://dlhd.pk/"
             }
         });
-    } else {
+    } 
+    // إضافة شرط جديد للتعامل مع LOAD_BALANCER
+    else if (fakeUrl.includes("LOAD_BALANCER") || fakeUrl.includes("custom_handler")) {
+        
+        // استخراج اسم القناة (مثل: beinsport1) من الرابط الوهمي
+        let channelName = "";
+        if (fakeUrl.includes("LOAD_BALANCER")) {
+            channelName = fakeUrl.match(/LOAD_BALANCERlive_tv_(.+?)\//)?.[1] || "";
+        } else if (fakeUrl.includes("custom_handler")) {
+            channelName = fakeUrl.match(/custom_handler_live_tv_(.+?)_description/)?.[1] || "";
+        }
+
+        // --- مهم جداً ---
+        // يجب أن تضع هنا الرابط الحقيقي الذي يقابله LOAD_BALANCER في التطبيق الأصلي
+        // الكود أدناه هو مجرد مثال، يجب تغييره بناءً على ما يرسله التطبيق الأصلي
+        return JSON.stringify({
+            "url": `https://example-real-server.com/live/${channelName}/index.m3u8`, // استبدل هذا بالرابط الحقيقي
+            "data": "",
+            "acceptSSL": "1",
+            "iframe": "",
+            "headers": {
+                // ضع الهيدرز المطلوبة لقنوات بين سبورت إن وجدت
+            }
+        });
+    } 
+    else {
         return JSON.stringify({
             "url": fakeUrl,
             "data": "",
