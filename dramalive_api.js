@@ -47,10 +47,8 @@ function convertFakeUrl(fakeUrl) {
             }
         });
     } 
-    // إضافة شرط جديد للتعامل مع LOAD_BALANCER
+    // التعامل مع LOAD_BALANCER و custom_handler
     else if (fakeUrl.includes("LOAD_BALANCER") || fakeUrl.includes("custom_handler")) {
-        
-        // استخراج اسم القناة (مثل: beinsport1) من الرابط الوهمي
         let channelName = "";
         if (fakeUrl.includes("LOAD_BALANCER")) {
             channelName = fakeUrl.match(/LOAD_BALANCERlive_tv_(.+?)\//)?.[1] || "";
@@ -58,17 +56,25 @@ function convertFakeUrl(fakeUrl) {
             channelName = fakeUrl.match(/custom_handler_live_tv_(.+?)_description/)?.[1] || "";
         }
 
-        // --- مهم جداً ---
-        // يجب أن تضع هنا الرابط الحقيقي الذي يقابله LOAD_BALANCER في التطبيق الأصلي
-        // الكود أدناه هو مجرد مثال، يجب تغييره بناءً على ما يرسله التطبيق الأصلي
         return JSON.stringify({
-            "url": `https://example-real-server.com/live/${channelName}/index.m3u8`, // استبدل هذا بالرابط الحقيقي
+            "url": `https://example-real-server.com/live/${channelName}/index.m3u8`, // ملاحظة: يجب تغيير هذا للرابط الحقيقي إن وجد
             "data": "",
             "acceptSSL": "1",
             "iframe": "",
-            "headers": {
-                // ضع الهيدرز المطلوبة لقنوات بين سبورت إن وجدت
-            }
+            "headers": {}
+        });
+    } 
+    // معالجة أي رابط وهمي آخر يبدأ بـ .LS.V2
+    else if (fakeUrl.startsWith("http://.LS.V2")) {
+        const possibleUrlMatch = fakeUrl.match(/(https?:\/\/[^\s]+)/);
+        const resolvedUrl = possibleUrlMatch ? possibleUrlMatch[1] : fakeUrl;
+        
+        return JSON.stringify({
+            "url": resolvedUrl,
+            "data": "",
+            "acceptSSL": "1",
+            "iframe": "",
+            "headers": {}
         });
     } 
     else {
@@ -82,16 +88,33 @@ function convertFakeUrl(fakeUrl) {
     }
 }
 
-// الدالة الكاملة لاستخراج الرابط (خطوة واحدة ببيانات التطبيق الأصلية)
+// الدالة الكاملة لاستخراج الرابط بشكل ديناميكي
 async function extractStreamUrl(channelId, fakeUrl) {
     try {
-        // تجهيز الرابط الوهمي
-        const urlData = convertFakeUrl(fakeUrl);
+        // 1. تجهيز الرابط الوهمي وتحويله إلى كائن (Object)
+        const urlDataString = convertFakeUrl(fakeUrl);
+        const urlConfig = JSON.parse(urlDataString);
 
-        // هذا هو الـ raw_data اللي التطبيق بيبعته (HTML كامل)
-        const rawData = `\r\n \n\n\n\n\n\n\n\n<html>\n<head>\n<title>91</title>\n\n<style>\nhtml, body {\n  margin: 0;\n  padding: 0;\n  height: 100%;\n  overflow: hidden;\n  background: black;\n}\n\n#player {\n  width: 100vw;\n  height: 100vh;\n}\n\n.container {\n  height: 100%;\n}\n</style>\n\n\n<script>(function(s){s.dataset.zone='10227946',s.src='https://llvpn.com/tag.min.js'})([document.documentElement, document.body].filter(Boolean).pop().appendChild(document.createElement('script')))</script>\n \n\n\n<script src="//cdn.jsdelivr.net/npm/@clappr/player@0.11.6/dist/clappr.min.js"></script>\n<script src="//cdn.jsdelivr.net/npm/clappr-pip@latest/dist/clappr-pip.min.js"></script>\n<script src="//cdn.jsdelivr.net/npm/@swarmcloud/hls/p2p-engine.min.js"></script>\n</head>\n\n<body class="container">\n\n<div id="player"></div>\n\n<script>\n(async () => {\n\n  const p2pConfig = {\n    live: true,\n    token: "greek",\n    channelId: "91",\n    announce: "https://ann.cdn-lab.shop/v1",\n    showSlogan: false,\n    sharePlaylist: false,\n    startFromSegmentOffset: 0,\n    trickleICE: true,\n  };\n\n\n\n  var player = new Clappr.Player({\n    source:window.atob('aHR0cHM6Ly94YW1lbGVvbi5waGFudGVtbGlzLnRvcC9mb3VyL3NlY3VyZS80OGFiMjhhZGQyMzI0NDk0ZmU2ZGM1NjE3ZTNkNTdkMC8xNzg1ODAxODUyL3ByZW1pdW05MS9pbmRleC5tM3U4'),\n    mediacontrol: { seekbar: "#FFFFFF", buttons: "#FFFFFF" },\n    mimeType: "application/x-mpegURL",\n    height: "100%",\n    width: "100%",\n    autoPlay: true,\n    mute: true,\n    plugins: [ClapprPip.PipButton, ClapprPip.PipPlugin],\n    playback: {\n      hlsjsConfig: {\n        maxBufferLength: 5,\n        liveSyncDurationCount: 3,\n      },\n    },\n  });\n\n  player.attachTo(document.getElementById("player"));\n  p2pConfig.hlsjsInstance = player.core.getCurrentPlayback()?._hls;\n  new P2PEngineHls(p2pConfig);\n\n})();\n</script>\n\n<div style="display:none;">\n  <script id="_waup77">\n    var _wau = _wau || [];\n    _wau.push(["classic", "ra5fzi2hwk", "p77"]);\n  </script>\n  <script async src="//waust.at/c.js"></script>\n</div>\n\n<script>\n    // disable right click\n    document.addEventListener('contextmenu', event => event.preventDefault());\n\n    document.onkeydown = function (e) {\n\n        // disable F12 key\n        if(e.keyCode == 123) {\n            return false;\n        }\n\n        // disable I key\n        if(e.ctrlKey && e.shiftKey && e.keyCode == 73){\n            return false;\n        }\n\n        // disable J key\n        if(e.ctrlKey && e.shiftKey && e.keyCode == 74) {\n            return false;\n        }\n\n        // disable U key\n        if(e.ctrlKey && e.keyCode == 85) {\n            return false;\n        }\n    }\n\n</script>\n\n\n\n\n  \n\n</body>\n</html>`;
+        // 2. جلب الـ raw_data (الـ HTML) ديناميكياً بدلاً من وضعه ثابتاً
+        let dynamicRawData = "";
+        let targetUrl = urlConfig.iframe || urlConfig.url;
 
-        // البيانات بالضبط زي ما التطبيق ببعتها
+        if (targetUrl && targetUrl.startsWith("http")) {
+            try {
+                const pageResponse = await axios.get(targetUrl, {
+                    headers: urlConfig.headers || {
+                        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.0.0 Safari/537.36"
+                    },
+                    timeout: 10000 // ننتظر 10 ثوانٍ كحد أقصى لجلب الصفحة
+                });
+                dynamicRawData = pageResponse.data;
+            } catch (fetchError) {
+                console.log(`[Warning] Failed to fetch HTML for ${targetUrl}:`, fetchError.message);
+                // إذا فشل جلب الصفحة (بسبب Cloudflare مثلاً) سيبقى dynamicRawData فارغاً
+            }
+        }
+
+        // 3. تجهيز بيانات الـ POST وإرسالها
         const postData = {
             "user_id": "_82668_1785761367217_notloggedin.com_dramalive3",
             "device_id": "e603540e-ed93-47a3-bec6-a15f7f056604",
@@ -110,13 +133,11 @@ async function extractStreamUrl(channelId, fakeUrl) {
             "mainServer": "http://main.eastgoessouth.online/api/live/livedrama/v13.0.0/",
             "type": "tv",
             "id": channelId,
-            "url": urlData,
+            "url": urlDataString,
             "agent": "double_redirect",
-            "raw_data": rawData
+            "raw_data": dynamicRawData // هنا نضع الـ HTML الذي جلبناه تواً
         };
 
-        console.log("Sending request with raw_data length:", rawData.length);
-        
         const encryptedBody = encryptAES(JSON.stringify(postData));
 
         const response = await axios.post(
@@ -136,8 +157,6 @@ async function extractStreamUrl(channelId, fakeUrl) {
         );
 
         const decryptedText = decryptAES(Buffer.from(response.data).toString("utf-8"));
-        console.log("Full response:", decryptedText);
-        
         const jsonResponse = JSON.parse(decryptedText);
 
         let result = {
@@ -147,7 +166,7 @@ async function extractStreamUrl(channelId, fakeUrl) {
             full_response: jsonResponse
         };
 
-        // استخراج الرابط من data.url
+        // 4. استخراج الرابط المباشر من رد السيرفر
         if (jsonResponse.data && jsonResponse.data.url) {
             try {
                 const innerData = JSON.parse(jsonResponse.data.url);
@@ -163,7 +182,7 @@ async function extractStreamUrl(channelId, fakeUrl) {
             }
         }
 
-        // البحث في raw_data عن window.atob
+        // البحث في raw_data إذا قام السيرفر بإرجاعه ولم يتم استخراج رابط مباشر
         if (!result.stream_url && jsonResponse.raw_data) {
             const atobMatches = jsonResponse.raw_data.match(/window\.atob\s*\(\s*['"]([A-Za-z0-9+/=]+)['"]\s*\)/g);
             if (atobMatches) {
@@ -312,7 +331,6 @@ app.get("/stream", async (req, res) => {
 
         let parsedStreams = [];
         
-        // معالجة السيرفر الأساسي
         const mainUrl = liveData.url || "";
         const mainAgent = liveData.agent || "";
         
@@ -335,7 +353,6 @@ app.get("/stream", async (req, res) => {
             parsedStreams.push(streamObj);
         }
 
-        // معالجة السيرفرات الاحتياطية
         const backupStr = liveData.backup || "";
         if (backupStr) {
             const backupParts = backupStr.split("-;-");
@@ -420,7 +437,6 @@ app.all("/extract", async (req, res) => {
     }
 });
 
-// قائمة الأقسام
 const allTopics = [
     {"id_topic":"hot_now","name_topic":"الأكثر مشاهدة","img_url_topic":"http://logo.twoapistack.work/img/topics/hot_now.png","code":""},
     {"id_topic":"live_matches","name_topic":"مباريات مباشرة","img_url_topic":"http://logo.twoapistack.work/img/topics/ic_fire.jpg","code":""},
