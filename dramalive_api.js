@@ -146,7 +146,7 @@ async function extractStreamUrl(channelId, fakeUrl) {
                     if (base64Match && base64Match[1]) {
                         try {
                             const decoded = Buffer.from(base64Match[1], 'base64').toString('utf-8');
-                            if (decoded.includes(".m3u8") || decoded.startsWith("http")) {
+                            if (decoded.includes(".m3u8") || decoded.includes(".mpd") || decoded.startsWith("http")) {
                                 result.stream_url = decoded;
                                 break;
                             }
@@ -155,9 +155,10 @@ async function extractStreamUrl(channelId, fakeUrl) {
                 }
             }
             if (!result.stream_url) {
-                const m3u8Match = jsonResponse.raw_data.match(/(https?:\/\/[^\s"'<>]+\.m3u8[^\s"'<>]*)/);
-                if (m3u8Match) {
-                    result.stream_url = m3u8Match[1];
+                // البحث بصيغتين m3u8 أو mpd
+                const directMatch = jsonResponse.raw_data.match(/(https?:\/\/[^\s"'<>]+\.(m3u8|mpd)[^\s"'<>]*)/);
+                if (directMatch) {
+                    result.stream_url = directMatch[1];
                 }
             }
         }
@@ -170,7 +171,6 @@ async function extractStreamUrl(channelId, fakeUrl) {
 
 // 1. مسار جلب القنوات
 app.get("/channels", async (req, res) => {
-    // ... (هذا المسار كما هو بدون تغيير)
     try {
         const topic = req.query.topic || "arabic_sport";
         const postData = {
@@ -230,12 +230,12 @@ app.get("/channels", async (req, res) => {
     }
 });
 
-// 2. مسار جلب روابط البث المُعدل (Clean & Player Ready)
+// 2. مسار جلب روابط البث (بفلترة صارمة للروابط المباشرة فقط)
 app.get("/stream", async (req, res) => {
     try {
         const id_live = req.query.id_live;
         const extract = req.query.extract === "true";
-        const format = req.query.format; // format=m3u لإرجاع ملف IPTV مباشرة
+        const format = req.query.format;
         
         if (!id_live) return res.status(400).json({ error: true, message: "يرجى إرسال id_live" });
 
@@ -285,14 +285,14 @@ app.get("/stream", async (req, res) => {
 
         let playableStreams = [];
 
-        // دالة مساعدة لمعالجة وفلترة الروابط
+        // الدالة المساعدة تم تعديلها للتحقق الصارم من امتداد الرابط
         const processStream = async (serverName, urlValue, agentValue) => {
             if (!urlValue || urlValue === "empty") return;
 
             let finalUrl = urlValue;
             let finalHeaders = {};
 
-            // إذا كان الرابط JSON مدمج
+            // استخراج الرابط إذا كان بصيغة JSON
             if (urlValue.startsWith("{") && urlValue.endsWith("}")) {
                 try {
                     const parsed = JSON.parse(urlValue);
@@ -301,7 +301,7 @@ app.get("/stream", async (req, res) => {
                 } catch (e) {}
             }
 
-            // الاستخراج إذا لزم الأمر
+            // محاولة استخراج الرابط المباشر
             if (extract && (agentValue === "redirect" || agentValue === "double_redirect" || finalUrl.includes("LOAD_BALANCER"))) {
                 const resolved = await extractStreamUrl(id_live, finalUrl);
                 if (resolved.stream_url) {
@@ -310,8 +310,9 @@ app.get("/stream", async (req, res) => {
                 }
             }
 
-            // التأكد من أن الرابط النهائي حقيقي وقابل للتشغيل (يبدأ بـ http)
-            if (finalUrl && finalUrl.startsWith("http")) {
+            // هنا يكمن السحر: لن يتم إضافة السيرفر إلا إذا كان الرابط المباشر 
+            // يبدأ بـ http ويحتوي على .m3u8 أو .mpd
+            if (finalUrl && finalUrl.startsWith("http") && (finalUrl.includes(".m3u8") || finalUrl.includes(".mpd"))) {
                 playableStreams.push({
                     quality: serverName,
                     url: finalUrl,
@@ -320,10 +321,10 @@ app.get("/stream", async (req, res) => {
             }
         };
 
-        // 1. معالجة السيرفر الأساسي
+        // معالجة السيرفر الأساسي
         await processStream("السيرفر الأساسي", liveData.url, liveData.agent);
 
-        // 2. معالجة السيرفرات الاحتياطية
+        // معالجة السيرفرات الاحتياطية
         const backupStr = liveData.backup || "";
         if (backupStr) {
             const backupParts = backupStr.split("-;-");
@@ -339,11 +340,9 @@ app.get("/stream", async (req, res) => {
             }
         }
 
-        // إذا طلب المستخدم الرابط بصيغة ملف M3U للتشغيل المباشر
         if (format === "m3u") {
             let m3u8Content = "#EXTM3U\n";
             playableStreams.forEach(stream => {
-                // دمج الهيدرز للـ VLC و ExoPlayer
                 if (stream.headers && Object.keys(stream.headers).length > 0) {
                     for (const [key, value] of Object.entries(stream.headers)) {
                        if (key.toLowerCase() === 'user-agent') m3u8Content += `#EXTVLCOPT:http-user-agent=${value}\n`;
@@ -359,7 +358,6 @@ app.get("/stream", async (req, res) => {
             return res.send(m3u8Content);
         }
 
-        // إرجاع رد JSON نظيف ومبسط جداً للمشغل
         res.json({
             success: true,
             channel: {
@@ -392,6 +390,7 @@ app.all("/extract", async (req, res) => {
     }
 });
 
+// قائمة جميع الأقسام الكاملة (81 قسم مع الصور)
 const allTopics = [
     {"id_topic":"hot_now","name_topic":"الأكثر مشاهدة","img_url_topic":"http://logo.twoapistack.work/img/topics/hot_now.png","code":""},
     {"id_topic":"live_matches","name_topic":"مباريات مباشرة","img_url_topic":"http://logo.twoapistack.work/img/topics/ic_fire.jpg","code":""},
@@ -476,6 +475,7 @@ const allTopics = [
     {"id_topic":"cl","name_topic":"Chile","img_url_topic":"http://logo.twoapistack.work/img/topics/ic_flag_cl.png","code":"cl"},
     {"id_topic":"cn","name_topic":"China","img_url_topic":"http://logo.twoapistack.work/img/topics/ic_flag_cn.png","code":"cn"}
 ];
+
 
 app.get("/get-all-topics", (req, res) => res.json(allTopics));
 
