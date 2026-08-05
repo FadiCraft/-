@@ -21,14 +21,13 @@ const sourceUrls = [
     "https://daddylive.mov/player/player11.json?v=1785871295139"
 ];
 
-// دالة جلب البيانات المباشرة بالتوازي لضمان أقصى سرعة
+// دالة جلب البيانات المباشرة بالتوازي
 async function fetchLiveChannels() {
     let allProcessedChannels = [];
 
-    // جلب جميع المصادر الثمانية في نفس الوقت (Parallel Fetching)
     const requests = sourceUrls.map(url => 
         axios.get(url, { timeout: 8000 }).catch(err => {
-            console.error(`خطأ مؤقت في جلب: ${url}`, err.message);
+            console.error(`خطأ في جلب: ${url}`, err.message);
             return null;
         })
     );
@@ -54,7 +53,7 @@ async function fetchLiveChannels() {
                 });
 
                 allProcessedChannels.push({
-                    id: item.id || null,
+                    id: String(item.id || ""),
                     name: channelName.trim(),
                     servers: servers
                 });
@@ -62,15 +61,13 @@ async function fetchLiveChannels() {
         }
     });
 
-    // إزالة التكرار بناءً على اسم القناة
     const uniqueChannels = Array.from(new Map(allProcessedChannels.map(c => [c.name, c])).values());
-
     return uniqueChannels.sort((a, b) => a.name.localeCompare(b.name));
 }
 
-// ---------------------- Endpoints ---------------------- //
+// ---------------------- API Endpoints ---------------------- //
 
-// 1. طلب القنوات حسب الحرف (مثال: /api/channels/A أو /api/channels/0-9)
+// 1. طلب القنوات حسب الحرف (مخرج مباشر كـ Array)
 app.get('/api/channels/:letter', async (req, res) => {
     try {
         const letter = req.params.letter.toUpperCase();
@@ -84,17 +81,14 @@ app.get('/api/channels/:letter', async (req, res) => {
             return firstLetter === letter;
         });
 
-        res.json({
-            letter: letter,
-            count: filteredChannels.length,
-            channels: filteredChannels
-        });
+        // إرجاع مصفوفة مباشرة جاهزة لـ Sketchware
+        res.json(filteredChannels);
     } catch (error) {
-        res.status(500).json({ error: "فشل في جلب البيانات المباشرة", details: error.message });
+        res.status(500).json([]);
     }
 });
 
-// 2. البحث المباشر باسم القناة (مثال: /api/search/bein)
+// 2. البحث باسم القناة (مخرج مباشر كـ Array)
 app.get('/api/search/:name', async (req, res) => {
     try {
         const query = req.params.name.trim().toLowerCase();
@@ -104,17 +98,13 @@ app.get('/api/search/:name', async (req, res) => {
             channel.name.toLowerCase().includes(query)
         );
 
-        res.json({
-            query: req.params.name,
-            count: results.length,
-            channels: results
-        });
+        // إرجاع مصفوفة مباشرة جاهزة لـ Sketchware
+        res.json(results);
     } catch (error) {
-        res.status(500).json({ error: "فشل في عملية البحث", details: error.message });
+        res.status(500).json([]);
     }
 });
 
-// تشغيل السيرفر
 app.listen(PORT, () => {
     console.log(`🚀 API Running on port ${PORT}`);
 });
