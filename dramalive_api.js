@@ -53,15 +53,21 @@ function convertFakeUrlToRealUrl(fakeUrl, channelId) {
 }
 
 // ==========================================
-// دالة: إنشاء هيكل ثابت للسيرفر
+// 🆕 دالة: إنشاء هيكل موحد للسيرفر
 // ==========================================
 function createServerObject(serverName, url, agent, headers = {}, drm = null, mediatype = null, resolved = false) {
+    // بناء headers: إذا ما فيه User-Agent، نستخدم agent
+    const finalHeaders = { ...headers };
+    if (!finalHeaders["User-Agent"] && agent) {
+        finalHeaders["User-Agent"] = agent;
+    }
+    
     return {
         server_name: resolved ? serverName + " ✅" : serverName,
         url: url || "",
         agent: agent || "ExoPlayer",
         drm: drm || null,
-        headers: headers || {},
+        headers: finalHeaders,
         mediatype: mediatype || null
     };
 }
@@ -78,7 +84,8 @@ function extractFromJSON(jsonStr) {
             headers: obj.headers || {},
             drm: obj.drm || null,
             mediatype: obj.mediatype || null,
-            iframe: obj.iframe || null
+            iframe: obj.iframe || null,
+            acceptSSL: obj.acceptSSL || null
         };
     } catch (e) {
         return {
@@ -87,7 +94,8 @@ function extractFromJSON(jsonStr) {
             headers: {},
             drm: null,
             mediatype: null,
-            iframe: null
+            iframe: null,
+            acceptSSL: null
         };
     }
 }
@@ -152,7 +160,7 @@ async function fetchIntermediateUrl(url, headers = {}, agent = null) {
             return {
                 success: true,
                 url: streamUrl,
-                agent: agent || "ExoPlayer",
+                agent: agent || requestHeaders["User-Agent"],
                 headers: headers || {},
                 mediatype: streamUrl.includes(".mpd") ? "dash" : "hls",
                 drm: null
@@ -221,7 +229,7 @@ async function sendRequest(channelId, urlData, agent, encryptedRawData = "", end
 }
 
 // ==========================================
-// دالة: حل رابط redirect بشكل متكرر
+// 🆕 دالة: حل رابط redirect وإرجاع هيكل كامل
 // ==========================================
 async function resolveRedirectUrl(channelId, fakeUrl) {
     let currentUrl = fakeUrl;
@@ -261,13 +269,13 @@ async function resolveRedirectUrl(channelId, fakeUrl) {
                 return null;
             }
             
-            // رابط مباشر m3u8/mpd ➔ خلاص
+            // رابط مباشر m3u8/mpd ➔ نرجع مع headers كاملة
             if (parsed.url && (parsed.url.includes(".m3u8") || parsed.url.includes(".mpd"))) {
                 return {
                     url: parsed.url,
-                    agent: parsed.agent || "ExoPlayer",
-                    headers: parsed.headers || {},
-                    drm: parsed.drm || null,
+                    agent: parsed.agent,
+                    headers: parsed.headers,
+                    drm: parsed.drm,
                     mediatype: parsed.url.includes(".mpd") ? "dash" : "hls"
                 };
             }
@@ -276,12 +284,28 @@ async function resolveRedirectUrl(channelId, fakeUrl) {
             if (parsed.url && parsed.url.startsWith("http")) {
                 const fetchResult = await fetchIntermediateUrl(parsed.url, parsed.headers, parsed.agent);
                 
-                if (fetchResult.success) return fetchResult;
+                if (fetchResult.success) {
+                    return {
+                        url: fetchResult.url,
+                        agent: fetchResult.agent || parsed.agent,
+                        headers: { ...fetchResult.headers, ...parsed.headers },
+                        drm: parsed.drm,
+                        mediatype: fetchResult.mediatype || (fetchResult.url.includes(".mpd") ? "dash" : "hls")
+                    };
+                }
                 
                 // iframe
                 if (parsed.iframe && parsed.iframe.startsWith("http")) {
                     const iframeResult = await fetchIntermediateUrl(parsed.iframe, parsed.headers, parsed.agent);
-                    if (iframeResult.success) return iframeResult;
+                    if (iframeResult.success) {
+                        return {
+                            url: iframeResult.url,
+                            agent: iframeResult.agent || parsed.agent,
+                            headers: { ...iframeResult.headers, ...parsed.headers },
+                            drm: parsed.drm,
+                            mediatype: iframeResult.mediatype || (iframeResult.url.includes(".mpd") ? "dash" : "hls")
+                        };
+                    }
                 }
                 
                 // raw_data
@@ -316,6 +340,99 @@ async function resolveRedirectUrl(channelId, fakeUrl) {
     }
 
     return null;
+}
+
+// ==========================================
+// 🆕 دالة: معالجة سيرفر واحد وإرجاع هيكل موحد
+// ==========================================
+async function processServer(id_live, serverName, urlData, agentData) {
+    // إذا urlData مش فارغ وهو JSON
+    if (urlData && urlData.startsWith("{")) {
+        const parsed = extractFromJSON(urlData);
+        const effectiveAgent = parsed.agent || agentData;
+        const isRedirect = effectiveAgent === "redirect";
+        
+        if (isRedirect) {
+            console.log(`🔄 حل ${serverName}...`);
+            const resolved = await resolveRedirectUrl(id_live, parsed.url || urlData);
+            
+            if (resolved) {
+                // ✅ تم الحل - نرجع الهيكل مع headers المستخرجة
+                return createServerObject(
+                    serverName,
+                    resolved.url,
+                    resolved.agent || effectiveAgent,
+                    resolved.headers || parsed.headers,
+                    resolved.drm || parsed.drm,
+                    resolved.mediatype,
+                    true
+                );
+            } else {
+                // ❌ فشل - نرجع الرابط الأصلي مع بياناته
+                return createServerObject(
+                    serverName,
+                    parsed.url,
+                    effectiveAgent,
+                    parsed.headers,
+                    parsed.drm,
+                    parsed.mediatype,
+                    false
+                );
+            }
+        } else {
+            // مش redirect - نرجع كما هو
+            return createServerObject(
+                serverName,
+                parsed.url,
+                effectiveAgent,
+                parsed.headers,
+                parsed.drm,
+                parsed.mediatype,
+                false
+            );
+        }
+    }
+    
+    // إذا urlData مش JSON
+    const isRedirect = agentData === "redirect";
+    
+    if (isRedirect) {
+        console.log(`🔄 حل ${serverName}...`);
+        const resolved = await resolveRedirectUrl(id_live, urlData);
+        
+        if (resolved) {
+            return createServerObject(
+                serverName,
+                resolved.url,
+                resolved.agent,
+                resolved.headers,
+                resolved.drm,
+                resolved.mediatype,
+                true
+            );
+        } else {
+            return createServerObject(
+                serverName,
+                urlData,
+                agentData,
+                {},
+                null,
+                null,
+                false
+            );
+        }
+    }
+    
+    // مش redirect ولا JSON - نرجع كما هو
+    return createServerObject(
+        serverName,
+        urlData,
+        agentData,
+        {},
+        null,
+        null,
+        false
+    );
 }
 
 // ==========================================
@@ -376,7 +493,7 @@ app.get("/channels", async (req, res) => {
 });
 
 // ==========================================
-// 2. 🆕 مسار جلب روابط البث (هيكل ثابت)
+// 2. 🆕 مسار /stream - هيكل موحد لجميع السيرفرات
 // ==========================================
 app.get("/stream", async (req, res) => {
     try {
@@ -438,82 +555,8 @@ app.get("/stream", async (req, res) => {
         const mainAgent = liveData.agent || "";
         
         if (mainUrl && mainUrl !== "empty") {
-            // إذا كان JSON، استخرج البيانات
-            if (mainUrl.startsWith("{")) {
-                const parsed = extractFromJSON(mainUrl);
-                
-                if (parsed.agent === "redirect" || mainAgent === "redirect") {
-                    console.log("🔄 حل السيرفر الأساسي...");
-                    const resolved = await resolveRedirectUrl(id_live, parsed.url || mainUrl);
-                    
-                    if (resolved) {
-                        parsedStreams.push(createServerObject(
-                            "السيرفر الأساسي",
-                            resolved.url,
-                            resolved.agent,
-                            resolved.headers,
-                            resolved.drm,
-                            resolved.mediatype,
-                            true
-                        ));
-                    } else {
-                        parsedStreams.push(createServerObject(
-                            "السيرفر الأساسي",
-                            parsed.url,
-                            parsed.agent,
-                            parsed.headers,
-                            parsed.drm,
-                            parsed.mediatype,
-                            false
-                        ));
-                    }
-                } else {
-                    parsedStreams.push(createServerObject(
-                        "السيرفر الأساسي",
-                        parsed.url,
-                        parsed.agent,
-                        parsed.headers,
-                        parsed.drm,
-                        parsed.mediatype,
-                        false
-                    ));
-                }
-            } else if (mainAgent === "redirect") {
-                console.log("🔄 حل السيرفر الأساسي...");
-                const resolved = await resolveRedirectUrl(id_live, mainUrl);
-                
-                if (resolved) {
-                    parsedStreams.push(createServerObject(
-                        "السيرفر الأساسي",
-                        resolved.url,
-                        resolved.agent,
-                        resolved.headers,
-                        resolved.drm,
-                        resolved.mediatype,
-                        true
-                    ));
-                } else {
-                    parsedStreams.push(createServerObject(
-                        "السيرفر الأساسي",
-                        mainUrl,
-                        mainAgent,
-                        {},
-                        null,
-                        null,
-                        false
-                    ));
-                }
-            } else {
-                parsedStreams.push(createServerObject(
-                    "السيرفر الأساسي",
-                    mainUrl,
-                    mainAgent,
-                    {},
-                    null,
-                    null,
-                    false
-                ));
-            }
+            const server = await processServer(id_live, "السيرفر الأساسي", mainUrl, mainAgent);
+            parsedStreams.push(server);
         }
 
         // 🔹 السيرفرات الاحتياطية
@@ -529,86 +572,11 @@ app.get("/stream", async (req, res) => {
                 const linkData = subParts[0] ? subParts[0].trim() : "";
                 const agentData = subParts[1] ? subParts[1].trim() : "ExoPlayer";
                 
-                if (!linkData) continue;
+                if (!linkData || linkData === "empty") continue;
 
                 const serverName = `سيرفر ${parsedStreams.length + 1}`;
-
-                if (linkData.startsWith("{")) {
-                    const parsed = extractFromJSON(linkData);
-                    const isRedirect = parsed.agent === "redirect" || agentData === "redirect";
-                    
-                    if (isRedirect) {
-                        console.log(`🔄 حل ${serverName}...`);
-                        const resolved = await resolveRedirectUrl(id_live, parsed.url || linkData);
-                        
-                        if (resolved) {
-                            parsedStreams.push(createServerObject(
-                                serverName,
-                                resolved.url,
-                                resolved.agent,
-                                resolved.headers,
-                                resolved.drm,
-                                resolved.mediatype,
-                                true
-                            ));
-                        } else {
-                            parsedStreams.push(createServerObject(
-                                serverName,
-                                parsed.url,
-                                parsed.agent,
-                                parsed.headers,
-                                parsed.drm,
-                                parsed.mediatype,
-                                false
-                            ));
-                        }
-                    } else {
-                        parsedStreams.push(createServerObject(
-                            serverName,
-                            parsed.url,
-                            parsed.agent,
-                            parsed.headers,
-                            parsed.drm,
-                            parsed.mediatype,
-                            false
-                        ));
-                    }
-                } else if (agentData === "redirect") {
-                    console.log(`🔄 حل ${serverName}...`);
-                    const resolved = await resolveRedirectUrl(id_live, linkData);
-                    
-                    if (resolved) {
-                        parsedStreams.push(createServerObject(
-                            serverName,
-                            resolved.url,
-                            resolved.agent,
-                            resolved.headers,
-                            resolved.drm,
-                            resolved.mediatype,
-                            true
-                        ));
-                    } else {
-                        parsedStreams.push(createServerObject(
-                            serverName,
-                            linkData,
-                            agentData,
-                            {},
-                            null,
-                            null,
-                            false
-                        ));
-                    }
-                } else {
-                    parsedStreams.push(createServerObject(
-                        serverName,
-                        linkData,
-                        agentData,
-                        {},
-                        null,
-                        null,
-                        false
-                    ));
-                }
+                const server = await processServer(id_live, serverName, linkData, agentData);
+                parsedStreams.push(server);
             }
         }
 
