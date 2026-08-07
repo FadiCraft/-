@@ -42,7 +42,6 @@ function decryptAES(encryptedText) {
 // دالة: تحويل الرابط الوهمي (LS.V2) إلى رابط مزدوج
 // ==========================================
 function convertFakeUrlToRealUrl(fakeUrl, channelId) {
-    // استخراج الجزء بعد LS.V2
     const match = fakeUrl.match(/\.LS\.V2(.+?)\/s$/);
     if (!match) return fakeUrl;
     
@@ -50,18 +49,14 @@ function convertFakeUrlToRealUrl(fakeUrl, channelId) {
     let realUrl = "";
     
     if (extractedPart.includes("LOAD_BALANCER")) {
-        // معالجة روابط LOAD_BALANCER
         const cleanId = extractedPart.replace("LOAD_BALANCER", "");
         realUrl = `{"url":"http://.LS.V2LOAD_BALANCER${cleanId}/s","data":"","acceptSSL":"1","iframe":"","headers":{}}`;
     } else if (extractedPart.includes("custom_handler")) {
-        // معالجة روابط custom_handler
         realUrl = `{"url":"${fakeUrl}","data":"","acceptSSL":"1","iframe":"","headers":{}}`;
     } else if (extractedPart.includes("daddy_")) {
-        // معالجة روابط daddy
         const daddyId = extractedPart.replace("daddy_", "");
         realUrl = `{"url":"https://hamis.romponalis.st/premiumtv/daddy4.php?id=${daddyId}","data":"","acceptSSL":"1","iframe":"https://daddylive.mov/embed/embed.php?id=${daddyId}&player=1&source=tv.json","headers":{"Referer":"https://dlhd.pk/"}}`;
     } else {
-        // معالجة عامة لأي نوع آخر
         realUrl = `{"url":"${fakeUrl}","data":"","acceptSSL":"1","iframe":"","headers":{}}`;
     }
     
@@ -69,11 +64,10 @@ function convertFakeUrlToRealUrl(fakeUrl, channelId) {
 }
 
 // ==========================================
-// 🆕 دالة: تجربة طلب redirect عادي (getLiveByRedirect)
+// 🆕 دالة: تجربة طلب redirect عادي (getLiveByRedirect) - ترجع المشفر والمفكوك
 // ==========================================
 async function testRedirectServer(channelId, fakeUrl) {
     try {
-        // تحويل الرابط الوهمي إلى رابط حقيقي
         const realUrl = convertFakeUrlToRealUrl(fakeUrl, channelId);
         
         const postData = {
@@ -98,11 +92,11 @@ async function testRedirectServer(channelId, fakeUrl) {
             "raw_data": ""
         };
 
+        // 🔐 النص المشفر اللي رح نرسله
         const encryptedBody = encryptAES(JSON.stringify(postData));
 
-        // 🆕 نرسل الطلب إلى getLiveByRedirect بدلاً من getLiveByDoubleRedirect
         const response = await axios.post(
-            "http://redirect.1spbgmu.com/redirect/getLiveByRedirect",  // 👈 هنا التغيير
+            "http://redirect.1spbgmu.com/redirect/getLiveByRedirect",
             encryptedBody,
             {
                 headers: {
@@ -117,13 +111,25 @@ async function testRedirectServer(channelId, fakeUrl) {
             }
         );
 
-        const decryptedText = decryptAES(Buffer.from(response.data).toString("utf-8"));
+        // 📝 النص المشفر اللي رجع من السيرفر
+        const encryptedResponse = Buffer.from(response.data).toString("utf-8");
+        
+        // 🔓 النص المفكوك
+        const decryptedText = decryptAES(encryptedResponse);
         const jsonResponse = JSON.parse(decryptedText);
 
         return {
             success: true,
-            raw_response: jsonResponse,  // 👈 نرجع الرد كما هو
-            message: "تم جلب الرد بنجاح - هذا للاختبار فقط"
+            // 🆕 البيانات المشفرة
+            encrypted: {
+                request_body: encryptedBody,      // النص المشفر اللي أرسلناه
+                response_body: encryptedResponse   // النص المشفر اللي استقبلناه
+            },
+            // البيانات المفكوكة
+            decrypted: {
+                request_body: postData,            // البيانات الأصلية قبل التشفير
+                response_body: jsonResponse        // الرد بعد فك التشفير
+            }
         };
 
     } catch (error) {
@@ -168,7 +174,6 @@ app.get("/test-redirect", async (req, res) => {
 // باقي الدوال والمسارات كما هي دون تغيير
 // ==========================================
 
-// دالة: معالجة سيرفرات redirect (LS.V2) - النسخة القديمة للـ double redirect
 async function resolveRedirectServer(channelId, fakeUrl) {
     try {
         const realUrl = convertFakeUrlToRealUrl(fakeUrl, channelId);
@@ -270,7 +275,6 @@ async function resolveRedirectServer(channelId, fakeUrl) {
     }
 }
 
-// دالة: معالجة سيرفرات double_redirect
 async function resolveDoubleRedirect(channelId, serverUrl) {
     try {
         let urlData = serverUrl;
@@ -437,7 +441,7 @@ app.get("/channels", async (req, res) => {
     }
 });
 
-// 2. مسار جلب روابط البث للقناة (Stream) - مع حل الروابط تلقائياً
+// 2. مسار جلب روابط البث للقناة (Stream)
 app.get("/stream", async (req, res) => {
     try {
         const id_live = req.query.id_live;
