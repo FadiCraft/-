@@ -53,6 +53,46 @@ function convertFakeUrlToRealUrl(fakeUrl, channelId) {
 }
 
 // ==========================================
+// دالة: إنشاء هيكل ثابت للسيرفر
+// ==========================================
+function createServerObject(serverName, url, agent, headers = {}, drm = null, mediatype = null, resolved = false) {
+    return {
+        server_name: resolved ? serverName + " ✅" : serverName,
+        url: url || "",
+        agent: agent || "ExoPlayer",
+        drm: drm || null,
+        headers: headers || {},
+        mediatype: mediatype || null
+    };
+}
+
+// ==========================================
+// دالة: استخراج البيانات من JSON string
+// ==========================================
+function extractFromJSON(jsonStr) {
+    try {
+        const obj = JSON.parse(jsonStr);
+        return {
+            url: obj.url || "",
+            agent: obj.agent || "ExoPlayer",
+            headers: obj.headers || {},
+            drm: obj.drm || null,
+            mediatype: obj.mediatype || null,
+            iframe: obj.iframe || null
+        };
+    } catch (e) {
+        return {
+            url: jsonStr,
+            agent: "ExoPlayer",
+            headers: {},
+            drm: null,
+            mediatype: null,
+            iframe: null
+        };
+    }
+}
+
+// ==========================================
 // دالة: زيارة رابط وسيط واستخراج m3u8/mpd
 // ==========================================
 async function fetchIntermediateUrl(url, headers = {}, agent = null) {
@@ -78,29 +118,24 @@ async function fetchIntermediateUrl(url, headers = {}, agent = null) {
         
         let streamUrl = null;
         
-        // البحث عن m3u8
         const m3u8Match = html.match(/(https?:\/\/[^\s"'<>]+\.m3u8[^\s"'<>]*)/i);
         if (m3u8Match) streamUrl = m3u8Match[1];
         
-        // البحث عن mpd
         if (!streamUrl) {
             const mpdMatch = html.match(/(https?:\/\/[^\s"'<>]+\.mpd[^\s"'<>]*)/i);
             if (mpdMatch) streamUrl = mpdMatch[1];
         }
         
-        // البحث في source src
         if (!streamUrl) {
             const sourceMatch = html.match(/source\s+src=["']([^"']+)["']/i);
             if (sourceMatch) streamUrl = sourceMatch[1];
         }
         
-        // البحث في iframe src
         if (!streamUrl) {
             const iframeMatch = html.match(/iframe\s+src=["']([^"']+)["']/i);
             if (iframeMatch) streamUrl = iframeMatch[1];
         }
 
-        // البحث عن base64 encoded URLs
         if (!streamUrl) {
             const base64Match = html.match(/atob\s*\(\s*['"]([A-Za-z0-9+/=]+)['"]\s*\)/);
             if (base64Match) {
@@ -113,17 +148,21 @@ async function fetchIntermediateUrl(url, headers = {}, agent = null) {
             }
         }
 
-        return {
-            success: streamUrl ? true : false,
-            stream_url: streamUrl,
-            mediatype: streamUrl?.includes(".mpd") ? "dash" : streamUrl?.includes(".m3u8") ? "hls" : null
-        };
+        if (streamUrl) {
+            return {
+                success: true,
+                url: streamUrl,
+                agent: agent || "ExoPlayer",
+                headers: headers || {},
+                mediatype: streamUrl.includes(".mpd") ? "dash" : "hls",
+                drm: null
+            };
+        }
+
+        return { success: false };
 
     } catch (error) {
-        return {
-            success: false,
-            error: error.message
-        };
+        return { success: false, error: error.message };
     }
 }
 
@@ -182,7 +221,7 @@ async function sendRequest(channelId, urlData, agent, encryptedRawData = "", end
 }
 
 // ==========================================
-// 🆕 دالة: حل رابط redirect واستخراج البث المباشر
+// دالة: حل رابط redirect بشكل متكرر
 // ==========================================
 async function resolveRedirectUrl(channelId, fakeUrl) {
     let currentUrl = fakeUrl;
@@ -204,37 +243,15 @@ async function resolveRedirectUrl(channelId, fakeUrl) {
         
         const data = result.decrypted_response.data;
         
-        if (!data || !data.url) {
-            return null;
-        }
+        if (!data || !data.url) return null;
 
         const newAgent = data.agent || "stop";
         
-        // 🔹 agent = advanced ➔ فك data.url
         if (newAgent === "advanced" || newAgent === "stop") {
-            let parsed;
-            try {
-                const innerData = JSON.parse(data.url);
-                parsed = {
-                    stream_url: innerData.url || data.url,
-                    agent: innerData.agent || newAgent,
-                    headers: innerData.headers || {},
-                    mediatype: innerData.mediatype || null,
-                    iframe: innerData.iframe || null,
-                    drm: innerData.drm || null
-                };
-            } catch (e) {
-                parsed = {
-                    stream_url: data.url,
-                    agent: newAgent,
-                    headers: {},
-                    mediatype: null,
-                    drm: null
-                };
-            }
+            const parsed = extractFromJSON(data.url);
             
-            // إذا stream_url هو رابط LS.V2 وهمي ➔ نجرب raw_data
-            if (parsed.stream_url && parsed.stream_url.includes(".LS.V2")) {
+            // رابط LS.V2 وهمي ➔ نجرب raw_data
+            if (parsed.url && parsed.url.includes(".LS.V2")) {
                 if (result.encrypted_response && !encryptedRawData) {
                     encryptedRawData = result.encrypted_response.trim();
                     currentUrl = data.url;
@@ -244,58 +261,30 @@ async function resolveRedirectUrl(channelId, fakeUrl) {
                 return null;
             }
             
-            // إذا stream_url فيه m3u8/mpd ➔ خلاص
-            if (parsed.stream_url && 
-                (parsed.stream_url.includes(".m3u8") || 
-                 parsed.stream_url.includes(".mpd") ||
-                 parsed.stream_url.includes(".ts"))) {
+            // رابط مباشر m3u8/mpd ➔ خلاص
+            if (parsed.url && (parsed.url.includes(".m3u8") || parsed.url.includes(".mpd"))) {
                 return {
-                    stream_url: parsed.stream_url,
-                    headers: parsed.headers || {},
+                    url: parsed.url,
                     agent: parsed.agent || "ExoPlayer",
-                    mediatype: parsed.mediatype || (parsed.stream_url.includes(".mpd") ? "dash" : "hls"),
-                    drm: parsed.drm || null
+                    headers: parsed.headers || {},
+                    drm: parsed.drm || null,
+                    mediatype: parsed.url.includes(".mpd") ? "dash" : "hls"
                 };
             }
             
-            // إذا stream_url موجود لكنه رابط وسيط ➔ زوره
-            if (parsed.stream_url && parsed.stream_url.startsWith("http")) {
-                const fetchResult = await fetchIntermediateUrl(
-                    parsed.stream_url,
-                    parsed.headers,
-                    parsed.agent
-                );
+            // رابط وسيط http ➔ زوره
+            if (parsed.url && parsed.url.startsWith("http")) {
+                const fetchResult = await fetchIntermediateUrl(parsed.url, parsed.headers, parsed.agent);
                 
-                if (fetchResult.success && fetchResult.stream_url) {
-                    return {
-                        stream_url: fetchResult.stream_url,
-                        headers: parsed.headers || {},
-                        agent: parsed.agent || "ExoPlayer",
-                        mediatype: fetchResult.mediatype || "hls",
-                        drm: parsed.drm || null
-                    };
-                }
+                if (fetchResult.success) return fetchResult;
                 
-                // إذا فشلت الزيارة، جرب iframe
+                // iframe
                 if (parsed.iframe && parsed.iframe.startsWith("http")) {
-                    const iframeResult = await fetchIntermediateUrl(
-                        parsed.iframe,
-                        parsed.headers,
-                        parsed.agent
-                    );
-                    
-                    if (iframeResult.success && iframeResult.stream_url) {
-                        return {
-                            stream_url: iframeResult.stream_url,
-                            headers: parsed.headers || {},
-                            agent: parsed.agent || "ExoPlayer",
-                            mediatype: iframeResult.mediatype || "hls",
-                            drm: parsed.drm || null
-                        };
-                    }
+                    const iframeResult = await fetchIntermediateUrl(parsed.iframe, parsed.headers, parsed.agent);
+                    if (iframeResult.success) return iframeResult;
                 }
                 
-                // فشل كل شيئ ➔ نجرب raw_data
+                // raw_data
                 if (result.encrypted_response && !encryptedRawData) {
                     encryptedRawData = result.encrypted_response.trim();
                     currentUrl = data.url;
@@ -306,7 +295,6 @@ async function resolveRedirectUrl(channelId, fakeUrl) {
                 return null;
             }
             
-            // إذا raw_data موجود ➔ نجرب
             if (result.encrypted_response && !encryptedRawData) {
                 encryptedRawData = result.encrypted_response.trim();
                 currentUrl = data.url;
@@ -317,7 +305,6 @@ async function resolveRedirectUrl(channelId, fakeUrl) {
             return null;
         }
         
-        // 🔹 agent = redirect أو double_redirect ➔ نكمل
         if (newAgent === "redirect" || newAgent === "double_redirect") {
             currentUrl = data.url;
             currentAgent = newAgent;
@@ -389,7 +376,7 @@ app.get("/channels", async (req, res) => {
 });
 
 // ==========================================
-// 2. 🆕 مسار جلب روابط البث (مع حل روابط redirect)
+// 2. 🆕 مسار جلب روابط البث (هيكل ثابت)
 // ==========================================
 app.get("/stream", async (req, res) => {
     try {
@@ -399,7 +386,7 @@ app.get("/stream", async (req, res) => {
             return res.status(400).json({ error: true, message: "يرجى إرسال id_live" });
         }
 
-        console.log(`📺 جلب سيرفرات القناة: ${id_live}`);
+        console.log(`📺 جلب سيرفرات: ${id_live}`);
 
         const postData = {
             "user_id": "_82668_1785761367217_notloggedin.com_dramalive3",
@@ -446,56 +433,90 @@ app.get("/stream", async (req, res) => {
 
         let parsedStreams = [];
         
-        // معالجة السيرفر الأساسي
+        // 🔹 السيرفر الأساسي
         const mainUrl = liveData.url || "";
         const mainAgent = liveData.agent || "";
         
         if (mainUrl && mainUrl !== "empty") {
-            let streamObj = {
-                server_name: "السيرفر الأساسي",
-                url: mainUrl,
-                agent: mainAgent || "ExoPlayer",
-                drm: null,
-                headers: {},
-                mediatype: null
-            };
-
-            // إذا كان agent = redirect ➔ نحل الرابط
-            if (mainAgent === "redirect") {
-                console.log(`🔄 حل الرابط الرئيسي...`);
-                try {
-                    const resolved = await resolveRedirectUrl(id_live, mainUrl);
-                    if (resolved && resolved.stream_url) {
-                        streamObj.url = resolved.stream_url;
-                        streamObj.agent = resolved.agent || streamObj.agent;
-                        streamObj.headers = resolved.headers || {};
-                        streamObj.drm = resolved.drm || null;
-                        streamObj.mediatype = resolved.mediatype || null;
-                        streamObj.server_name += " ✅";
+            // إذا كان JSON، استخرج البيانات
+            if (mainUrl.startsWith("{")) {
+                const parsed = extractFromJSON(mainUrl);
+                
+                if (parsed.agent === "redirect" || mainAgent === "redirect") {
+                    console.log("🔄 حل السيرفر الأساسي...");
+                    const resolved = await resolveRedirectUrl(id_live, parsed.url || mainUrl);
+                    
+                    if (resolved) {
+                        parsedStreams.push(createServerObject(
+                            "السيرفر الأساسي",
+                            resolved.url,
+                            resolved.agent,
+                            resolved.headers,
+                            resolved.drm,
+                            resolved.mediatype,
+                            true
+                        ));
                     } else {
-                        streamObj.server_name += " ❌";
+                        parsedStreams.push(createServerObject(
+                            "السيرفر الأساسي",
+                            parsed.url,
+                            parsed.agent,
+                            parsed.headers,
+                            parsed.drm,
+                            parsed.mediatype,
+                            false
+                        ));
                     }
-                } catch (err) {
-                    console.error("❌ فشل حل الرابط الرئيسي:", err.message);
-                    streamObj.server_name += " ❌";
+                } else {
+                    parsedStreams.push(createServerObject(
+                        "السيرفر الأساسي",
+                        parsed.url,
+                        parsed.agent,
+                        parsed.headers,
+                        parsed.drm,
+                        parsed.mediatype,
+                        false
+                    ));
+                }
+            } else if (mainAgent === "redirect") {
+                console.log("🔄 حل السيرفر الأساسي...");
+                const resolved = await resolveRedirectUrl(id_live, mainUrl);
+                
+                if (resolved) {
+                    parsedStreams.push(createServerObject(
+                        "السيرفر الأساسي",
+                        resolved.url,
+                        resolved.agent,
+                        resolved.headers,
+                        resolved.drm,
+                        resolved.mediatype,
+                        true
+                    ));
+                } else {
+                    parsedStreams.push(createServerObject(
+                        "السيرفر الأساسي",
+                        mainUrl,
+                        mainAgent,
+                        {},
+                        null,
+                        null,
+                        false
+                    ));
                 }
             } else {
-                // إذا مش redirect، نشوف إذا فيه JSON بالـ url
-                if (mainUrl.startsWith("{")) {
-                    try {
-                        const jsonObj = JSON.parse(mainUrl);
-                        streamObj.url = jsonObj.url || mainUrl;
-                        if (jsonObj.agent) streamObj.agent = jsonObj.agent;
-                        if (jsonObj.headers) streamObj.headers = jsonObj.headers;
-                        if (jsonObj.drm) streamObj.drm = jsonObj.drm;
-                    } catch (e) {}
-                }
+                parsedStreams.push(createServerObject(
+                    "السيرفر الأساسي",
+                    mainUrl,
+                    mainAgent,
+                    {},
+                    null,
+                    null,
+                    false
+                ));
             }
-
-            parsedStreams.push(streamObj);
         }
 
-        // معالجة السيرفرات الاحتياطية
+        // 🔹 السيرفرات الاحتياطية
         const backupStr = liveData.backup || "";
         if (backupStr) {
             const backupParts = backupStr.split("-;-");
@@ -510,53 +531,83 @@ app.get("/stream", async (req, res) => {
                 
                 if (!linkData) continue;
 
-                let streamObj = {
-                    server_name: `سيرفر ${parsedStreams.length + 1}`,
-                    url: "",
-                    agent: agentData,
-                    drm: null,
-                    headers: {},
-                    mediatype: null
-                };
+                const serverName = `سيرفر ${parsedStreams.length + 1}`;
 
-                // محاولة parsing الرابط كـ JSON
-                if (linkData.startsWith("{") && linkData.endsWith("}")) {
-                    try {
-                        const jsonObj = JSON.parse(linkData);
-                        streamObj.url = jsonObj.url || "";
-                        if (jsonObj.agent) streamObj.agent = jsonObj.agent;
-                        if (jsonObj.headers) streamObj.headers = jsonObj.headers;
-                        if (jsonObj.drm) streamObj.drm = jsonObj.drm;
-                    } catch (e) {
-                        streamObj.url = linkData;
+                if (linkData.startsWith("{")) {
+                    const parsed = extractFromJSON(linkData);
+                    const isRedirect = parsed.agent === "redirect" || agentData === "redirect";
+                    
+                    if (isRedirect) {
+                        console.log(`🔄 حل ${serverName}...`);
+                        const resolved = await resolveRedirectUrl(id_live, parsed.url || linkData);
+                        
+                        if (resolved) {
+                            parsedStreams.push(createServerObject(
+                                serverName,
+                                resolved.url,
+                                resolved.agent,
+                                resolved.headers,
+                                resolved.drm,
+                                resolved.mediatype,
+                                true
+                            ));
+                        } else {
+                            parsedStreams.push(createServerObject(
+                                serverName,
+                                parsed.url,
+                                parsed.agent,
+                                parsed.headers,
+                                parsed.drm,
+                                parsed.mediatype,
+                                false
+                            ));
+                        }
+                    } else {
+                        parsedStreams.push(createServerObject(
+                            serverName,
+                            parsed.url,
+                            parsed.agent,
+                            parsed.headers,
+                            parsed.drm,
+                            parsed.mediatype,
+                            false
+                        ));
+                    }
+                } else if (agentData === "redirect") {
+                    console.log(`🔄 حل ${serverName}...`);
+                    const resolved = await resolveRedirectUrl(id_live, linkData);
+                    
+                    if (resolved) {
+                        parsedStreams.push(createServerObject(
+                            serverName,
+                            resolved.url,
+                            resolved.agent,
+                            resolved.headers,
+                            resolved.drm,
+                            resolved.mediatype,
+                            true
+                        ));
+                    } else {
+                        parsedStreams.push(createServerObject(
+                            serverName,
+                            linkData,
+                            agentData,
+                            {},
+                            null,
+                            null,
+                            false
+                        ));
                     }
                 } else {
-                    streamObj.url = linkData;
-                }
-
-                // إذا كان agent = redirect ➔ نحل الرابط
-                if (streamObj.agent === "redirect" || agentData === "redirect") {
-                    console.log(`🔄 حل سيرفر ${parsedStreams.length + 1}...`);
-                    try {
-                        const resolved = await resolveRedirectUrl(id_live, streamObj.url);
-                        if (resolved && resolved.stream_url) {
-                            streamObj.url = resolved.stream_url;
-                            streamObj.agent = resolved.agent || streamObj.agent;
-                            streamObj.headers = resolved.headers || {};
-                            streamObj.drm = resolved.drm || null;
-                            streamObj.mediatype = resolved.mediatype || null;
-                            streamObj.server_name += " ✅";
-                        } else {
-                            streamObj.server_name += " ❌";
-                        }
-                    } catch (err) {
-                        console.error(`❌ فشل حل السيرفر ${i + 1}:`, err.message);
-                        streamObj.server_name += " ❌";
-                    }
-                }
-
-                if (streamObj.url && streamObj.url !== "empty") {
-                    parsedStreams.push(streamObj);
+                    parsedStreams.push(createServerObject(
+                        serverName,
+                        linkData,
+                        agentData,
+                        {},
+                        null,
+                        null,
+                        false
+                    ));
                 }
             }
         }
@@ -568,7 +619,7 @@ app.get("/stream", async (req, res) => {
             streams: parsedStreams
         };
 
-        console.log(`✅ تم تجهيز ${parsedStreams.length} سيرفر`);
+        console.log(`✅ ${parsedStreams.length} سيرفر`);
         res.json(result);
 
     } catch (error) {
@@ -578,34 +629,24 @@ app.get("/stream", async (req, res) => {
 });
 
 // ==========================================
-// 3. مسار استخراج الرابط النهائي
+// 3. مسار /resolve و /extract
 // ==========================================
 app.all("/resolve", async (req, res) => {
     try {
         const targetUrl = req.query.url || req.body.url;
-        const channelId = req.query.id_live || req.body.id_live;
-        const type = req.query.type || req.body.type || "redirect";
+        const channelId = req.query.id_live || req.body.id_live || "test";
         
         if (!targetUrl) {
             return res.status(400).json({ error: true, message: "يرجى إرسال الرابط (url)" });
         }
 
-        let result;
-        if (type === "double_redirect") {
-            result = await resolveRedirectUrl(channelId, targetUrl);
-        } else {
-            result = await resolveRedirectUrl(channelId, targetUrl);
-        }
-        
-        res.json(result || { error: true, message: "فشل استخراج الرابط" });
+        const result = await resolveRedirectUrl(channelId, targetUrl);
+        res.json(result ? { success: true, ...result } : { error: true, message: "فشل استخراج الرابط" });
     } catch (error) {
         res.status(500).json({ error: true, message: error.message });
     }
 });
 
-// ==========================================
-// 🆕 مسار: /extract - للاختبار
-// ==========================================
 app.get("/extract", async (req, res) => {
     try {
         const targetUrl = req.query.url;
