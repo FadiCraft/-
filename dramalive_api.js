@@ -141,7 +141,7 @@ async function step2_DoubleRedirect(channelId, dataFromStep1) {
         "id": channelId,
         "url": urlForStep2,
         "agent": agentForStep2,
-        "raw_data": JSON.stringify(dataFromStep1)  // 🆕 نرسل raw_data كاملة
+        "raw_data": ""
     };
 
     const encryptedBody = encryptAES(JSON.stringify(postData));
