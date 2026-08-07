@@ -53,19 +53,34 @@ function convertFakeUrlToRealUrl(fakeUrl, channelId) {
 }
 
 // ==========================================
+// 🆕 القيم الافتراضية للـ agent والـ headers
+// ==========================================
+const DEFAULT_AGENT = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/149.0.0.0 Safari/537.36";
+const DEFAULT_HEADERS = {
+    "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/149.0.0.0 Safari/537.36"
+};
+
+// ==========================================
 // 🆕 دالة: إنشاء هيكل موحد للسيرفر
 // ==========================================
-function createServerObject(serverName, url, agent, headers = {}, drm = null, mediatype = null, resolved = false) {
-    // بناء headers: إذا ما فيه User-Agent، نستخدم agent
-    const finalHeaders = { ...headers };
-    if (!finalHeaders["User-Agent"] && agent) {
-        finalHeaders["User-Agent"] = agent;
+function createServerObject(serverName, url, agent, headers = {}, drm = null, mediatype = null) {
+    // إذا ما في agent، استخدم الافتراضي
+    const finalAgent = agent || DEFAULT_AGENT;
+    
+    // إذا ما في headers، استخدم الافتراضي
+    const finalHeaders = headers && Object.keys(headers).length > 0 
+        ? headers 
+        : { ...DEFAULT_HEADERS };
+    
+    // إذا headers موجودة بس ما فيها User-Agent، أضيف User-Agent
+    if (!finalHeaders["User-Agent"] && !finalHeaders["user-agent"]) {
+        finalHeaders["User-Agent"] = finalAgent;
     }
     
     return {
-        server_name: resolved ? serverName + " ✅" : serverName,
+        server_name: serverName,
         url: url || "",
-        agent: agent || "ExoPlayer",
+        agent: finalAgent,
         drm: drm || null,
         headers: finalHeaders,
         mediatype: mediatype || null
@@ -80,7 +95,7 @@ function extractFromJSON(jsonStr) {
         const obj = JSON.parse(jsonStr);
         return {
             url: obj.url || "",
-            agent: obj.agent || "ExoPlayer",
+            agent: obj.agent || null,
             headers: obj.headers || {},
             drm: obj.drm || null,
             mediatype: obj.mediatype || null,
@@ -90,7 +105,7 @@ function extractFromJSON(jsonStr) {
     } catch (e) {
         return {
             url: jsonStr,
-            agent: "ExoPlayer",
+            agent: null,
             headers: {},
             drm: null,
             mediatype: null,
@@ -106,7 +121,7 @@ function extractFromJSON(jsonStr) {
 async function fetchIntermediateUrl(url, headers = {}, agent = null) {
     try {
         const requestHeaders = {
-            "User-Agent": agent || "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+            "User-Agent": agent || DEFAULT_AGENT,
             "Accept": "*/*",
             "Accept-Language": "en-US,en;q=0.9",
             "Connection": "keep-alive",
@@ -160,10 +175,7 @@ async function fetchIntermediateUrl(url, headers = {}, agent = null) {
             return {
                 success: true,
                 url: streamUrl,
-                agent: agent || requestHeaders["User-Agent"],
-                headers: headers || {},
-                mediatype: streamUrl.includes(".mpd") ? "dash" : "hls",
-                drm: null
+                mediatype: streamUrl.includes(".mpd") ? "dash" : "hls"
             };
         }
 
@@ -229,13 +241,18 @@ async function sendRequest(channelId, urlData, agent, encryptedRawData = "", end
 }
 
 // ==========================================
-// 🆕 دالة: حل رابط redirect وإرجاع هيكل كامل
+// 🆕 دالة: حل رابط redirect وإرجاع البيانات كاملة
 // ==========================================
 async function resolveRedirectUrl(channelId, fakeUrl) {
     let currentUrl = fakeUrl;
     let currentAgent = "redirect";
     let encryptedRawData = "";
     let maxSteps = 5;
+    
+    // نحتفظ بالـ agent والـ headers اللي بنلاقيهم من السيرفر
+    let foundAgent = null;
+    let foundHeaders = {};
+    let foundDrm = null;
 
     while (maxSteps > 0) {
         maxSteps--;
@@ -258,6 +275,13 @@ async function resolveRedirectUrl(channelId, fakeUrl) {
         if (newAgent === "advanced" || newAgent === "stop") {
             const parsed = extractFromJSON(data.url);
             
+            // 🎯 نجمع agent و headers من الرد
+            if (parsed.agent && !foundAgent) foundAgent = parsed.agent;
+            if (parsed.headers && Object.keys(parsed.headers).length > 0) {
+                foundHeaders = { ...foundHeaders, ...parsed.headers };
+            }
+            if (parsed.drm && !foundDrm) foundDrm = parsed.drm;
+            
             // رابط LS.V2 وهمي ➔ نجرب raw_data
             if (parsed.url && parsed.url.includes(".LS.V2")) {
                 if (result.encrypted_response && !encryptedRawData) {
@@ -269,41 +293,49 @@ async function resolveRedirectUrl(channelId, fakeUrl) {
                 return null;
             }
             
-            // رابط مباشر m3u8/mpd ➔ نرجع مع headers كاملة
+            // رابط مباشر m3u8/mpd ➔ نرجع مع البيانات اللي جمعناها
             if (parsed.url && (parsed.url.includes(".m3u8") || parsed.url.includes(".mpd"))) {
                 return {
                     url: parsed.url,
-                    agent: parsed.agent,
-                    headers: parsed.headers,
-                    drm: parsed.drm,
+                    agent: foundAgent || parsed.agent,
+                    headers: Object.keys(foundHeaders).length > 0 ? foundHeaders : parsed.headers,
+                    drm: foundDrm || parsed.drm,
                     mediatype: parsed.url.includes(".mpd") ? "dash" : "hls"
                 };
             }
             
             // رابط وسيط http ➔ زوره
             if (parsed.url && parsed.url.startsWith("http")) {
-                const fetchResult = await fetchIntermediateUrl(parsed.url, parsed.headers, parsed.agent);
+                const fetchResult = await fetchIntermediateUrl(
+                    parsed.url, 
+                    Object.keys(foundHeaders).length > 0 ? foundHeaders : parsed.headers,
+                    foundAgent || parsed.agent
+                );
                 
                 if (fetchResult.success) {
                     return {
                         url: fetchResult.url,
-                        agent: fetchResult.agent || parsed.agent,
-                        headers: { ...fetchResult.headers, ...parsed.headers },
-                        drm: parsed.drm,
-                        mediatype: fetchResult.mediatype || (fetchResult.url.includes(".mpd") ? "dash" : "hls")
+                        agent: foundAgent || parsed.agent,
+                        headers: Object.keys(foundHeaders).length > 0 ? foundHeaders : parsed.headers,
+                        drm: foundDrm || parsed.drm,
+                        mediatype: fetchResult.mediatype
                     };
                 }
                 
                 // iframe
                 if (parsed.iframe && parsed.iframe.startsWith("http")) {
-                    const iframeResult = await fetchIntermediateUrl(parsed.iframe, parsed.headers, parsed.agent);
+                    const iframeResult = await fetchIntermediateUrl(
+                        parsed.iframe,
+                        Object.keys(foundHeaders).length > 0 ? foundHeaders : parsed.headers,
+                        foundAgent || parsed.agent
+                    );
                     if (iframeResult.success) {
                         return {
                             url: iframeResult.url,
-                            agent: iframeResult.agent || parsed.agent,
-                            headers: { ...iframeResult.headers, ...parsed.headers },
-                            drm: parsed.drm,
-                            mediatype: iframeResult.mediatype || (iframeResult.url.includes(".mpd") ? "dash" : "hls")
+                            agent: foundAgent || parsed.agent,
+                            headers: Object.keys(foundHeaders).length > 0 ? foundHeaders : parsed.headers,
+                            drm: foundDrm || parsed.drm,
+                            mediatype: iframeResult.mediatype
                         };
                     }
                 }
@@ -356,27 +388,25 @@ async function processServer(id_live, serverName, urlData, agentData) {
             console.log(`🔄 حل ${serverName}...`);
             const resolved = await resolveRedirectUrl(id_live, parsed.url || urlData);
             
-            if (resolved) {
-                // ✅ تم الحل - نرجع الهيكل مع headers المستخرجة
+            if (resolved && resolved.url) {
+                // ✅ تم الحل - نرجع الهيكل مع البيانات المستخرجة
                 return createServerObject(
-                    serverName,
+                    serverName + " ✅",
                     resolved.url,
                     resolved.agent || effectiveAgent,
                     resolved.headers || parsed.headers,
                     resolved.drm || parsed.drm,
-                    resolved.mediatype,
-                    true
+                    resolved.mediatype
                 );
             } else {
-                // ❌ فشل - نرجع الرابط الأصلي مع بياناته
+                // ❌ فشل - نرجع الرابط الأصلي
                 return createServerObject(
-                    serverName,
-                    parsed.url,
+                    serverName + " ❌",
+                    parsed.url || "",
                     effectiveAgent,
                     parsed.headers,
                     parsed.drm,
-                    parsed.mediatype,
-                    false
+                    parsed.mediatype
                 );
             }
         } else {
@@ -387,8 +417,7 @@ async function processServer(id_live, serverName, urlData, agentData) {
                 effectiveAgent,
                 parsed.headers,
                 parsed.drm,
-                parsed.mediatype,
-                false
+                parsed.mediatype
             );
         }
     }
@@ -400,25 +429,23 @@ async function processServer(id_live, serverName, urlData, agentData) {
         console.log(`🔄 حل ${serverName}...`);
         const resolved = await resolveRedirectUrl(id_live, urlData);
         
-        if (resolved) {
+        if (resolved && resolved.url) {
             return createServerObject(
-                serverName,
+                serverName + " ✅",
                 resolved.url,
                 resolved.agent,
                 resolved.headers,
                 resolved.drm,
-                resolved.mediatype,
-                true
+                resolved.mediatype
             );
         } else {
             return createServerObject(
-                serverName,
-                urlData,
+                serverName + " ❌",
+                "",
                 agentData,
                 {},
                 null,
-                null,
-                false
+                null
             );
         }
     }
@@ -430,8 +457,7 @@ async function processServer(id_live, serverName, urlData, agentData) {
         agentData,
         {},
         null,
-        null,
-        false
+        null
     );
 }
 
@@ -493,7 +519,7 @@ app.get("/channels", async (req, res) => {
 });
 
 // ==========================================
-// 2. 🆕 مسار /stream - هيكل موحد لجميع السيرفرات
+// 2. 🆕 مسار /stream - هيكل موحد مع Agent و Headers
 // ==========================================
 app.get("/stream", async (req, res) => {
     try {
@@ -570,7 +596,7 @@ app.get("/stream", async (req, res) => {
                 
                 const subParts = part.split("--");
                 const linkData = subParts[0] ? subParts[0].trim() : "";
-                const agentData = subParts[1] ? subParts[1].trim() : "ExoPlayer";
+                const agentData = subParts[1] ? subParts[1].trim() : "";
                 
                 if (!linkData || linkData === "empty") continue;
 
@@ -639,44 +665,7 @@ const allTopics = [
     {"id_topic":"alwan","name_topic":"الوان","img_url_topic":"http://logo.twoapistack.work/img/topics/alwan.jpg","code":""},
     {"id_topic":"shahid","name_topic":"شاهد","img_url_topic":"http://logo.twoapistack.work/img/topics/shahid.jpg","code":""},
     {"id_topic":"arabic_sport","name_topic":"رياضة","img_url_topic":"http://logo.twoapistack.work/img/topics/ic_basketball_red.png","code":""},
-    {"id_topic":"ar_1","name_topic":"ترفيه عربي","img_url_topic":"http://logo.twoapistack.work/img/topics/ic_featured_ar.png","code":""},
-    {"id_topic":"ar_2","name_topic":"أخبار","img_url_topic":"http://logo.twoapistack.work/img/topics/ic_newspaper.png","code":""},
-    {"id_topic":"ar_3","name_topic":"أطفال","img_url_topic":"http://logo.twoapistack.work/img/topics/ic_kids.jpg","code":""},
-    {"id_topic":"ar_5","name_topic":"وثائقي","img_url_topic":"http://logo.twoapistack.work/img/topics/ic_documantry.png","code":""},
-    {"id_topic":"ar_6","name_topic":"ديني","img_url_topic":"http://logo.twoapistack.work/img/topics/ic__mosque.png","code":""},
-    {"id_topic":"ar_7","name_topic":"أفلام","img_url_topic":"http://logo.twoapistack.work/img/topics/ic_film.png","code":""},
-    {"id_topic":"ar_8","name_topic":"موسيقى","img_url_topic":"http://logo.twoapistack.work/img/topics/ic_music.jpg","code":""},
-    {"id_topic":"art","name_topic":"ART","img_url_topic":"http://logo.twoapistack.work/img/topics/art.png","code":""},
-    {"id_topic":"osn","name_topic":"OSN","img_url_topic":"http://logo.twoapistack.work/img/topics/osn_logo.png","code":""},
-    {"id_topic":"netflix","name_topic":"NETFLIX","img_url_topic":"http://logo.twoapistack.work/img/topics/netflix.jpg","code":""},
-    {"id_topic":"mbc","name_topic":"MBC","img_url_topic":"http://logo.twoapistack.work/img/topics/mpc.jpg","code":""},
-    {"id_topic":"rotana","name_topic":"روتانا","img_url_topic":"http://logo.twoapistack.work/img/topics/rotana.jpg","code":""},
-    {"id_topic":"cook","name_topic":"الطبخ","img_url_topic":"http://logo.twoapistack.work/img/topics/ic_chef.png","code":""},
-    {"id_topic":"weyyak","name_topic":"وياك","img_url_topic":"http://logo.twoapistack.work/img/topics/weyyak.jpg","code":""},
-    {"id_topic":"bein_entir","name_topic":"بي ان ترفيه","img_url_topic":"http://logo.twoapistack.work/img/topics/bein_enter.jpg","code":""},
-    {"id_topic":"bein_sport","name_topic":"بي ان سبورت","img_url_topic":"http://logo.twoapistack.work/img/topics/bein_sport.png","code":""},
-    {"id_topic":"science","name_topic":"علوم","img_url_topic":"http://logo.twoapistack.work/img/topics/science.png","code":""},
-    {"id_topic":"anime","name_topic":"انيمي","img_url_topic":"http://logo.twoapistack.work/img/topics/anime.jpg","code":""},
-    {"id_topic":"roya","name_topic":"رؤيا","img_url_topic":"https://backend.roya-tv.com/imagechanger/Size01Q40R11/images/channels/iMoPuU3u5qnqMsL.png","code":""},
-    {"id_topic":"963","name_topic":"سوريا","img_url_topic":"http://logo.twoapistack.work/img/topics/ic_flag_sy.png","code":"sy"},
-    {"id_topic":"961","name_topic":"لبنان","img_url_topic":"http://logo.twoapistack.work/img/topics/ic_flag_lb.png","code":"lb"},
-    {"id_topic":"966","name_topic":"السعودية","img_url_topic":"http://logo.twoapistack.work/img/topics/ic_flag_sa.png","code":"sa"},
-    {"id_topic":"20","name_topic":"مصر","img_url_topic":"http://logo.twoapistack.work/img/topics/ic_flag_eg.png","code":"eg"},
-    {"id_topic":"971","name_topic":"الإمارات","img_url_topic":"http://logo.twoapistack.work/img/topics/ic_flag_ae.png","code":"ae"},
-    {"id_topic":"962","name_topic":"الأردن","img_url_topic":"http://logo.twoapistack.work/img/topics/ic_flag_jo.png","code":"jo"},
-    {"id_topic":"974","name_topic":"قطر","img_url_topic":"http://logo.twoapistack.work/img/topics/ic_flag_qa.png","code":"qa"},
-    {"id_topic":"964","name_topic":"العراق","img_url_topic":"http://logo.twoapistack.work/img/topics/ic_flag_iq.png","code":"iq"},
-    {"id_topic":"965","name_topic":"الكويت","img_url_topic":"http://logo.twoapistack.work/img/topics/ic_flag_kw.png","code":"kw"},
-    {"id_topic":"968","name_topic":"عُمان","img_url_topic":"http://logo.twoapistack.work/img/topics/ic_flag_om.png","code":"om"},
-    {"id_topic":"967","name_topic":"اليمن","img_url_topic":"http://logo.twoapistack.work/img/topics/ic_flag_ye.png","code":"ye"},
-    {"id_topic":"973","name_topic":"البحرين","img_url_topic":"http://logo.twoapistack.work/img/topics/ic_flag_bh.png","code":"bh"},
-    {"id_topic":"970","name_topic":"فلسطين","img_url_topic":"http://logo.twoapistack.work/img/topics/ic_flag_ps.png","code":"ps"},
-    {"id_topic":"249","name_topic":"السودان","img_url_topic":"http://logo.twoapistack.work/img/topics/ic_flag_sd.png","code":""},
-    {"id_topic":"216","name_topic":"تونس","img_url_topic":"http://logo.twoapistack.work/img/topics/ic_flag_tn.png","code":""},
-    {"id_topic":"212","name_topic":"المغرب","img_url_topic":"http://logo.twoapistack.work/img/topics/ic_flag_ma.png","code":""},
-    {"id_topic":"213","name_topic":"الجزائر","img_url_topic":"http://logo.twoapistack.work/img/topics/ic_flag_dz.png","code":""},
-    {"id_topic":"218","name_topic":"ليبيا","img_url_topic":"http://logo.twoapistack.work/img/topics/ic_flag_ly.png","code":""},
-    {"id_topic":"252","name_topic":"الصومال","img_url_topic":"http://logo.twoapistack.work/img/topics/ic_flag_so.png","code":""}
+    {"id_topic":"bein_sport","name_topic":"بي ان سبورت","img_url_topic":"http://logo.twoapistack.work/img/topics/bein_sport.png","code":""}
 ];
 
 app.get("/get-all-topics", (req, res) => {
