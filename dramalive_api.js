@@ -5,12 +5,15 @@ const CryptoJS = require("crypto-js");
 const app = express();
 const PORT = process.env.PORT || 3000;
 
+// السماح بقراءة البيانات المرسلة بصيغة JSON و URL-encoded
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
+// مفاتيح التشفير الثابتة
 const KEY = CryptoJS.enc.Utf8.parse("0123456789abcdef");
 const IV = CryptoJS.enc.Utf8.parse("fedcba9876543210");
 
+// دالة التشفير
 function encryptAES(data) {
     const encrypted = CryptoJS.AES.encrypt(data, KEY, {
         iv: IV,
@@ -20,6 +23,7 @@ function encryptAES(data) {
     return encrypted.toString() + ":" + CryptoJS.enc.Base64.stringify(IV);
 }
 
+// دالة فك التشفير
 function decryptAES(encryptedText) {
     encryptedText = encryptedText.trim();
     const lastColon = encryptedText.lastIndexOf(":");
@@ -34,51 +38,44 @@ function decryptAES(encryptedText) {
     return decrypted.toString(CryptoJS.enc.Utf8);
 }
 
-function convertFakeUrl(fakeUrl) {
-    if (fakeUrl.includes("daddy_")) {
-        const daddyId = fakeUrl.match(/daddy_(\d+)/)?.[1] || "";
-        return JSON.stringify({
-            "url": `https://hamis.romponalis.st/premiumtv/daddy4.php?id=${daddyId}`,
-            "data": "",
-            "acceptSSL": "1",
-            "iframe": `https://daddylive.mov/embed/embed.php?id=${daddyId}&player=1&source=tv.json`,
-            "headers": {
-                "Referer": "https://dlhd.pk/"
-            }
-        });
-    } 
-    else if (fakeUrl.includes("LOAD_BALANCER") || fakeUrl.includes("custom_handler")) {
-        let channelName = "";
-        if (fakeUrl.includes("LOAD_BALANCER")) {
-            channelName = fakeUrl.match(/LOAD_BALANCERlive_tv_(.+?)\//)?.[1] || "";
-        } else if (fakeUrl.includes("custom_handler")) {
-            channelName = fakeUrl.match(/custom_handler_live_tv_(.+?)_description/)?.[1] || "";
-        }
-
-        return JSON.stringify({
-            "url": `https://example-real-server.com/live/${channelName}/index.m3u8`, 
-            "data": "",
-            "acceptSSL": "1",
-            "iframe": "",
-            "headers": {}
-        });
-    } 
-    else {
-        return JSON.stringify({
-            "url": fakeUrl,
-            "data": "",
-            "acceptSSL": "1",
-            "iframe": "",
-            "headers": {}
-        });
+// ==========================================
+// دالة: تحويل الرابط الوهمي (LS.V2) إلى رابط مزدوج
+// ==========================================
+function convertFakeUrlToRealUrl(fakeUrl, channelId) {
+    // استخراج الجزء بعد LS.V2
+    const match = fakeUrl.match(/\.LS\.V2(.+?)\/s$/);
+    if (!match) return fakeUrl;
+    
+    const extractedPart = match[1];
+    let realUrl = "";
+    
+    if (extractedPart.includes("LOAD_BALANCER")) {
+        // معالجة روابط LOAD_BALANCER
+        const cleanId = extractedPart.replace("LOAD_BALANCER", "");
+        realUrl = `{"url":"http://.LS.V2LOAD_BALANCER${cleanId}/s","data":"","acceptSSL":"1","iframe":"","headers":{}}`;
+    } else if (extractedPart.includes("custom_handler")) {
+        // معالجة روابط custom_handler
+        realUrl = `{"url":"${fakeUrl}","data":"","acceptSSL":"1","iframe":"","headers":{}}`;
+    } else if (extractedPart.includes("daddy_")) {
+        // معالجة روابط daddy
+        const daddyId = extractedPart.replace("daddy_", "");
+        realUrl = `{"url":"https://hamis.romponalis.st/premiumtv/daddy4.php?id=${daddyId}","data":"","acceptSSL":"1","iframe":"https://daddylive.mov/embed/embed.php?id=${daddyId}&player=1&source=tv.json","headers":{"Referer":"https://dlhd.pk/"}}`;
+    } else {
+        // معالجة عامة لأي نوع آخر
+        realUrl = `{"url":"${fakeUrl}","data":"","acceptSSL":"1","iframe":"","headers":{}}`;
     }
+    
+    return realUrl;
 }
 
-async function extractStreamUrl(channelId, fakeUrl) {
+// ==========================================
+// دالة: معالجة سيرفرات redirect (LS.V2)
+// ==========================================
+async function resolveRedirectServer(channelId, fakeUrl) {
     try {
-        const urlData = convertFakeUrl(fakeUrl);
-        const rawData = `\r\n \n\n\n\n\n\n\n\n<html>\n<head>\n<title>91</title>\n\n<style>\nhtml, body {\n  margin: 0;\n  padding: 0;\n  height: 100%;\n  overflow: hidden;\n  background: black;\n}\n\n#player {\n  width: 100vw;\n  height: 100vh;\n}\n\n.container {\n  height: 100%;\n}\n</style>\n\n\n<script>(function(s){s.dataset.zone='10227946',s.src='https://llvpn.com/tag.min.js'})([document.documentElement, document.body].filter(Boolean).pop().appendChild(document.createElement('script')))</script>\n \n\n\n<script src="//cdn.jsdelivr.net/npm/@clappr/player@0.11.6/dist/clappr.min.js"></script>\n<script src="//cdn.jsdelivr.net/npm/clappr-pip@latest/dist/clappr-pip.min.js"></script>\n<script src="//cdn.jsdelivr.net/npm/@swarmcloud/hls/p2p-engine.min.js"></script>\n</head>\n\n<body class="container">\n\n<div id="player"></div>\n\n<script>\n(async () => {\n\n  const p2pConfig = {\n    live: true,\n    token: "greek",\n    channelId: "91",\n    announce: "https://ann.cdn-lab.shop/v1",\n    showSlogan: false,\n    sharePlaylist: false,\n    startFromSegmentOffset: 0,\n    trickleICE: true,\n  };\n\n\n\n  var player = new Clappr.Player({\n    source:window.atob('aHR0cHM6Ly94YW1lbGVvbi5waGFudGVtbGlzLnRvcC9mb3VyL3NlY3VyZS80OGFiMjhhZGQyMzI0NDk0ZmU2ZGM1NjE3ZTNkNTdkMC8xNzg1ODAxODUyL3ByZW1pdW05MS9pbmRleC5tM3U4'),\n    mediacontrol: { seekbar: "#FFFFFF", buttons: "#FFFFFF" },\n    mimeType: "application/x-mpegURL",\n    height: "100%",\n    width: "100%",\n    autoPlay: true,\n    mute: true,\n    plugins: [ClapprPip.PipButton, ClapprPip.PipPlugin],\n    playback: {\n      hlsjsConfig: {\n        maxBufferLength: 5,\n        liveSyncDurationCount: 3,\n      },\n    },\n  });\n\n  player.attachTo(document.getElementById("player"));\n  p2pConfig.hlsjsInstance = player.core.getCurrentPlayback()?._hls;\n  new P2PEngineHls(p2pConfig);\n\n})();\n</script>\n\n<div style="display:none;">\n  <script id="_waup77">\n    var _wau = _wau || [];\n    _wau.push(["classic", "ra5fzi2hwk", "p77"]);\n  </script>\n  <script async src="//waust.at/c.js"></script>\n</div>\n\n<script>\n    document.addEventListener('contextmenu', event => event.preventDefault());\n    document.onkeydown = function (e) {\n        if(e.keyCode == 123) return false;\n        if(e.ctrlKey && e.shiftKey && e.keyCode == 73) return false;\n        if(e.ctrlKey && e.shiftKey && e.keyCode == 74) return false;\n        if(e.ctrlKey && e.keyCode == 85) return false;\n    }\n</script>\n</body>\n</html>`;
-
+        // تحويل الرابط الوهمي إلى رابط حقيقي
+        const realUrl = convertFakeUrlToRealUrl(fakeUrl, channelId);
+        
         const postData = {
             "user_id": "_82668_1785761367217_notloggedin.com_dramalive3",
             "device_id": "e603540e-ed93-47a3-bec6-a15f7f056604",
@@ -93,13 +90,12 @@ async function extractStreamUrl(channelId, fakeUrl) {
             "isPremium": false,
             "isCoupon_active": false,
             "hideAds": false,
-            "appCount": "{\"adsFailed\":80,\"adsLoaded\":64,\"adsShowed\":22,\"runCount\":10}",
+            "appCount": "{\"adsFailed\":73,\"adsLoaded\":56,\"adsShowed\":17,\"runCount\":8}",
             "mainServer": "http://main.eastgoessouth.online/api/live/livedrama/v13.0.0/",
-            "type": "tv",
             "id": channelId,
-            "url": urlData,
-            "agent": "double_redirect",
-            "raw_data": rawData
+            "url": realUrl,
+            "agent": "redirect",
+            "raw_data": ""
         };
 
         const encryptedBody = encryptAES(JSON.stringify(postData));
@@ -125,19 +121,27 @@ async function extractStreamUrl(channelId, fakeUrl) {
 
         let result = {
             stream_url: null,
-            headers: {}
+            headers: {},
+            agent: "ExoPlayer"
         };
 
+        // استخراج الرابط من data.url
         if (jsonResponse.data && jsonResponse.data.url) {
             try {
                 const innerData = JSON.parse(jsonResponse.data.url);
                 result.stream_url = innerData.url || null;
-                if (innerData.headers) result.headers = innerData.headers;
+                if (innerData.headers) {
+                    result.headers = innerData.headers;
+                }
+                if (innerData.agent) {
+                    result.agent = innerData.agent;
+                }
             } catch (e) {
                 result.stream_url = jsonResponse.data.url;
             }
         }
 
+        // البحث في raw_data عن window.atob
         if (!result.stream_url && jsonResponse.raw_data) {
             const atobMatches = jsonResponse.raw_data.match(/window\.atob\s*\(\s*['"]([A-Za-z0-9+/=]+)['"]\s*\)/g);
             if (atobMatches) {
@@ -146,7 +150,7 @@ async function extractStreamUrl(channelId, fakeUrl) {
                     if (base64Match && base64Match[1]) {
                         try {
                             const decoded = Buffer.from(base64Match[1], 'base64').toString('utf-8');
-                            if (decoded.includes(".m3u8") || decoded.includes(".mpd") || decoded.startsWith("http")) {
+                            if (decoded.includes(".m3u8") || decoded.startsWith("http")) {
                                 result.stream_url = decoded;
                                 break;
                             }
@@ -154,22 +158,138 @@ async function extractStreamUrl(channelId, fakeUrl) {
                     }
                 }
             }
-            if (!result.stream_url) {
-                // البحث بصيغتين m3u8 أو mpd
-                const directMatch = jsonResponse.raw_data.match(/(https?:\/\/[^\s"'<>]+\.(m3u8|mpd)[^\s"'<>]*)/);
-                if (directMatch) {
-                    result.stream_url = directMatch[1];
-                }
+        }
+
+        // البحث عن رابط m3u8 مباشر
+        if (!result.stream_url && jsonResponse.raw_data) {
+            const m3u8Match = jsonResponse.raw_data.match(/(https?:\/\/[^\s"'<>]+\.m3u8[^\s"'<>]*)/);
+            if (m3u8Match) {
+                result.stream_url = m3u8Match[1];
             }
         }
 
         return result;
+
     } catch (error) {
-        return { stream_url: null, headers: {} };
+        console.error("Error in redirect server:", error.message);
+        return { error: true, message: error.message };
     }
 }
 
-// 1. مسار جلب القنوات
+// ==========================================
+// دالة: معالجة سيرفرات double_redirect
+// ==========================================
+async function resolveDoubleRedirect(channelId, serverUrl) {
+    try {
+        // إذا كان الرابط JSON، نستخدمه كما هو
+        let urlData = serverUrl;
+        
+        // إذا لم يكن JSON، نحوله
+        if (!serverUrl.startsWith("{")) {
+            urlData = convertFakeUrlToRealUrl(serverUrl, channelId);
+        }
+
+        const postData = {
+            "user_id": "_82668_1785761367217_notloggedin.com_dramalive3",
+            "device_id": "e603540e-ed93-47a3-bec6-a15f7f056604",
+            "device_api": "28",
+            "version_name": "187",
+            "language": "ar",
+            "timezone": "Europe/Istanbul",
+            "device_type": "phone",
+            "KEY_ACTIVATED_TYPE": "232425",
+            "store": "direct",
+            "isStoreVersion": false,
+            "isPremium": false,
+            "isCoupon_active": false,
+            "hideAds": false,
+            "appCount": "{\"adsFailed\":73,\"adsLoaded\":56,\"adsShowed\":17,\"runCount\":8}",
+            "mainServer": "http://main.eastgoessouth.online/api/live/livedrama/v13.0.0/",
+            "id": channelId,
+            "url": urlData,
+            "agent": "double_redirect",
+            "raw_data": ""
+        };
+
+        const encryptedBody = encryptAES(JSON.stringify(postData));
+
+        const response = await axios.post(
+            "http://redirect.1spbgmu.com/redirect/getLiveByDoubleRedirect",
+            encryptedBody,
+            {
+                headers: {
+                    "Content-Type": "text/plain",
+                    "User-Agent": "Dalvik/2.1.0 (Linux; U; Android 9; SM-S908E Build/TP1A.220624.014)",
+                    "Host": "redirect.1spbgmu.com",
+                    "Connection": "Keep-Alive",
+                    "Accept-Encoding": "gzip"
+                },
+                timeout: 15000,
+                responseType: "arraybuffer"
+            }
+        );
+
+        const decryptedText = decryptAES(Buffer.from(response.data).toString("utf-8"));
+        const jsonResponse = JSON.parse(decryptedText);
+
+        let result = {
+            stream_url: null,
+            headers: {},
+            agent: "ExoPlayer"
+        };
+
+        // استخراج البيانات من response.data.url
+        if (jsonResponse.data && jsonResponse.data.url) {
+            try {
+                const innerData = JSON.parse(jsonResponse.data.url);
+                result.stream_url = innerData.url || null;
+                if (innerData.headers) {
+                    result.headers = innerData.headers;
+                }
+                if (innerData.agent) {
+                    result.agent = innerData.agent;
+                }
+            } catch (e) {
+                result.stream_url = jsonResponse.data.url;
+            }
+        }
+
+        // إذا لم نجد رابط مباشر، نبحث في raw_data عن window.atob
+        if (!result.stream_url && jsonResponse.raw_data) {
+            const atobMatches = jsonResponse.raw_data.match(/window\.atob\s*\(\s*['"]([A-Za-z0-9+/=]+)['"]\s*\)/g);
+            if (atobMatches) {
+                for (let match of atobMatches) {
+                    const base64Match = match.match(/['"]([A-Za-z0-9+/=]+)['"]/);
+                    if (base64Match && base64Match[1]) {
+                        try {
+                            const decoded = Buffer.from(base64Match[1], 'base64').toString('utf-8');
+                            if (decoded.includes(".m3u8") || decoded.startsWith("http")) {
+                                result.stream_url = decoded;
+                                break;
+                            }
+                        } catch (err) {}
+                    }
+                }
+            }
+        }
+
+        // التحقق من وجود رابط m3u8 في raw_data مباشرة
+        if (!result.stream_url && jsonResponse.raw_data) {
+            const m3u8Match = jsonResponse.raw_data.match(/(https?:\/\/[^\s"'<>]+\.m3u8[^\s"'<>]*)/);
+            if (m3u8Match) {
+                result.stream_url = m3u8Match[1];
+            }
+        }
+
+        return result;
+
+    } catch (error) {
+        console.error("Error in double redirect:", error.message);
+        return { error: true, message: error.message };
+    }
+}
+
+// 1. مسار جلب القنوات حسب القسم (Topic)
 app.get("/channels", async (req, res) => {
     try {
         const topic = req.query.topic || "arabic_sport";
@@ -230,12 +350,11 @@ app.get("/channels", async (req, res) => {
     }
 });
 
-// 2. مسار جلب روابط البث (بفلترة صارمة للروابط المباشرة فقط)
+// 2. مسار جلب روابط البث للقناة (Stream) - مع حل الروابط تلقائياً
 app.get("/stream", async (req, res) => {
     try {
         const id_live = req.query.id_live;
-        const extract = req.query.extract === "true";
-        const format = req.query.format;
+        const resolveAll = req.query.resolve === "true"; // لحل جميع الروابط
         
         if (!id_live) return res.status(400).json({ error: true, message: "يرجى إرسال id_live" });
 
@@ -283,51 +402,43 @@ app.get("/stream", async (req, res) => {
         const rawJson = JSON.parse(decryptedResponse);
         const liveData = rawJson.live || {};
 
-        let playableStreams = [];
+        let parsedStreams = [];
+        
+        // معالجة السيرفر الأساسي
+        const mainUrl = liveData.url || "";
+        const mainAgent = liveData.agent || "";
+        
+        if (mainUrl && mainUrl !== "empty") {
+            let streamObj = {
+                server_name: "السيرفر الأساسي",
+                url: mainUrl,
+                agent: mainAgent || "ExoPlayer",
+                drm: null
+            };
 
-        // الدالة المساعدة تم تعديلها للتحقق الصارم من امتداد الرابط
-        const processStream = async (serverName, urlValue, agentValue) => {
-            if (!urlValue || urlValue === "empty") return;
-
-            let finalUrl = urlValue;
-            let finalHeaders = {};
-
-            // استخراج الرابط إذا كان بصيغة JSON
-            if (urlValue.startsWith("{") && urlValue.endsWith("}")) {
+            // حل الرابط إذا كان من نوع redirect و resolve=true
+            if (resolveAll && mainAgent === "redirect") {
                 try {
-                    const parsed = JSON.parse(urlValue);
-                    finalUrl = parsed.url || "";
-                    if (parsed.headers) finalHeaders = parsed.headers;
-                } catch (e) {}
-            }
-
-            // محاولة استخراج الرابط المباشر
-            if (extract && (agentValue === "redirect" || agentValue === "double_redirect" || finalUrl.includes("LOAD_BALANCER"))) {
-                const resolved = await extractStreamUrl(id_live, finalUrl);
-                if (resolved.stream_url) {
-                    finalUrl = resolved.stream_url;
-                    if (resolved.headers) finalHeaders = Object.assign(finalHeaders, resolved.headers);
+                    const resolved = await resolveRedirectServer(id_live, mainUrl);
+                    if (resolved.stream_url) {
+                        streamObj.url = resolved.stream_url;
+                        streamObj.agent = resolved.agent || streamObj.agent;
+                        streamObj.headers = resolved.headers;
+                        streamObj.server_name += " ✅";
+                    }
+                } catch (err) {
+                    console.error("Failed to resolve main server:", err.message);
                 }
             }
 
-            // هنا يكمن السحر: لن يتم إضافة السيرفر إلا إذا كان الرابط المباشر 
-            // يبدأ بـ http ويحتوي على .m3u8 أو .mpd
-            if (finalUrl && finalUrl.startsWith("http") && (finalUrl.includes(".m3u8") || finalUrl.includes(".mpd"))) {
-                playableStreams.push({
-                    quality: serverName,
-                    url: finalUrl,
-                    headers: finalHeaders
-                });
-            }
-        };
-
-        // معالجة السيرفر الأساسي
-        await processStream("السيرفر الأساسي", liveData.url, liveData.agent);
+            parsedStreams.push(streamObj);
+        }
 
         // معالجة السيرفرات الاحتياطية
         const backupStr = liveData.backup || "";
         if (backupStr) {
             const backupParts = backupStr.split("-;-");
+            
             for (let i = 0; i < backupParts.length; i++) {
                 const part = backupParts[i].trim();
                 if (!part) continue;
@@ -336,64 +447,103 @@ app.get("/stream", async (req, res) => {
                 const linkData = subParts[0] ? subParts[0].trim() : "";
                 const agentData = subParts[1] ? subParts[1].trim() : "ExoPlayer";
                 
-                await processStream(`سيرفر ${playableStreams.length + 1}`, linkData, agentData);
+                if (!linkData) continue;
+
+                let streamObj = {
+                    server_name: `سيرفر ${parsedStreams.length + 1}`,
+                    url: "",
+                    agent: agentData,
+                    drm: null,
+                    headers: {}
+                };
+
+                // محاولة parsing الرابط كـ JSON
+                if (linkData.startsWith("{") && linkData.endsWith("}")) {
+                    try {
+                        const jsonObj = JSON.parse(linkData);
+                        streamObj.url = jsonObj.url || "";
+                        if (jsonObj.agent) streamObj.agent = jsonObj.agent;
+                        if (jsonObj.headers) {
+                            streamObj.headers = jsonObj.headers;
+                            if (jsonObj.headers["User-Agent"]) streamObj.agent = jsonObj.headers["User-Agent"];
+                        }
+                        if (jsonObj.drm) streamObj.drm = jsonObj.drm;
+                    } catch (e) {
+                        streamObj.url = linkData;
+                    }
+                } else {
+                    streamObj.url = linkData;
+                }
+
+                // حل الرابط حسب النوع
+                if (resolveAll && streamObj.url) {
+                    try {
+                        let resolved = null;
+                        
+                        if (agentData === "redirect") {
+                            resolved = await resolveRedirectServer(id_live, streamObj.url);
+                        } else if (agentData === "double_redirect") {
+                            resolved = await resolveDoubleRedirect(id_live, linkData);
+                        }
+                        
+                        if (resolved && resolved.stream_url) {
+                            streamObj.url = resolved.stream_url;
+                            streamObj.agent = resolved.agent || streamObj.agent;
+                            streamObj.headers = resolved.headers || streamObj.headers;
+                            streamObj.server_name += " ✅";
+                        }
+                    } catch (err) {
+                        console.error(`Failed to resolve server ${i}:`, err.message);
+                    }
+                }
+
+                if (streamObj.url) {
+                    parsedStreams.push(streamObj);
+                }
             }
         }
 
-        if (format === "m3u") {
-            let m3u8Content = "#EXTM3U\n";
-            playableStreams.forEach(stream => {
-                if (stream.headers && Object.keys(stream.headers).length > 0) {
-                    for (const [key, value] of Object.entries(stream.headers)) {
-                       if (key.toLowerCase() === 'user-agent') m3u8Content += `#EXTVLCOPT:http-user-agent=${value}\n`;
-                       if (key.toLowerCase() === 'referer') m3u8Content += `#EXTVLCOPT:http-referrer=${value}\n`;
-                    }
-                }
-                m3u8Content += `#EXTINF:-1 tvg-logo="${liveData.img_url || ''}", ${liveData.name || id_live} - ${stream.quality}\n`;
-                m3u8Content += `${stream.url}\n`;
-            });
-            
-            res.setHeader('Content-Type', 'audio/mpegurl; charset=utf-8');
-            res.setHeader('Content-Disposition', `attachment; filename="${id_live}.m3u"`);
-            return res.send(m3u8Content);
-        }
-
         res.json({
-            success: true,
-            channel: {
-                id: liveData.id_live || id_live,
-                name: liveData.name || "",
-                logo: liveData.img_url || ""
-            },
-            total_sources: playableStreams.length,
-            sources: playableStreams
+            id_live: liveData.id_live || id_live,
+            name: liveData.name || "",
+            img_url: liveData.img_url || "",
+            streams: parsedStreams
         });
 
     } catch (error) {
-        console.error("Stream error:", error);
         res.status(500).json({ error: true, message: error.message });
     }
 });
 
-app.all("/extract", async (req, res) => {
+// 3. مسار استخراج الرابط النهائي
+app.all("/resolve", async (req, res) => {
     try {
+        const targetUrl = req.query.url || req.body.url; 
         const channelId = req.query.id_live || req.body.id_live;
-        const urlValue = req.query.url || req.body.url;
+        const type = req.query.type || req.body.type || "redirect";
         
-        if (!channelId || !urlValue) {
-            return res.status(400).json({ error: true, message: "يرجى إرسال id_live و url" });
+        if (!targetUrl) {
+            return res.status(400).json({ error: true, message: "يرجى إرسال الرابط (url) المراد استخراجه" });
         }
-        const result = await extractStreamUrl(channelId, urlValue);
+
+        let result;
+        if (type === "double_redirect") {
+            result = await resolveDoubleRedirect(channelId, targetUrl);
+        } else {
+            result = await resolveRedirectServer(channelId, targetUrl);
+        }
+        
         res.json(result);
+
     } catch (error) {
         res.status(500).json({ error: true, message: error.message });
     }
 });
 
-// قائمة جميع الأقسام الكاملة (81 قسم مع الصور)
+// قائمة الأقسام (Topics)
 const allTopics = [
     {"id_topic":"hot_now","name_topic":"الأكثر مشاهدة","img_url_topic":"http://logo.twoapistack.work/img/topics/hot_now.png","code":""},
-    {"id_topic":"live_matches","name_topic":"مباريات مباشرة","img_url_topic":"http://logo.twoapistack.work/img/topics/ic_fire.jpg","code":""},
+   
     {"id_topic":"alwan","name_topic":"الوان","img_url_topic":"http://logo.twoapistack.work/img/topics/alwan.jpg","code":""},
     {"id_topic":"shahid","name_topic":"شاهد","img_url_topic":"http://logo.twoapistack.work/img/topics/shahid.jpg","code":""},
     {"id_topic":"arabic_sport","name_topic":"رياضة","img_url_topic":"http://logo.twoapistack.work/img/topics/ic_basketball_red.png","code":""},
@@ -413,12 +563,11 @@ const allTopics = [
     {"id_topic":"weyyak","name_topic":"وياك","img_url_topic":"http://logo.twoapistack.work/img/topics/weyyak.jpg","code":""},
     {"id_topic":"bein_entir","name_topic":"بي ان ترفيه","img_url_topic":"http://logo.twoapistack.work/img/topics/bein_enter.jpg","code":""},
     {"id_topic":"bein_sport","name_topic":"بي ان سبورت","img_url_topic":"http://logo.twoapistack.work/img/topics/bein_sport.png","code":""},
-    {"id_topic":"unsorted","name_topic":"unsorted","img_url_topic":"","code":""},
-    {"id_topic":"relax","name_topic":"ريلاكس","img_url_topic":"http://logo.twoapistack.work/img/topics/relax.png","code":""},
+    
+    
     {"id_topic":"science","name_topic":"علوم","img_url_topic":"http://logo.twoapistack.work/img/topics/science.png","code":""},
     {"id_topic":"anime","name_topic":"انيمي","img_url_topic":"http://logo.twoapistack.work/img/topics/anime.jpg","code":""},
     {"id_topic":"roya","name_topic":"رؤيا","img_url_topic":"https://backend.roya-tv.com/imagechanger/Size01Q40R11/images/channels/iMoPuU3u5qnqMsL.png","code":""},
-    {"id_topic":"twitch","name_topic":"Live Twitch","img_url_topic":"http://logo.twoapistack.work/img/topics/twitch.png","code":""},
     {"id_topic":"963","name_topic":"سوريا","img_url_topic":"http://logo.twoapistack.work/img/topics/ic_flag_sy.png","code":"sy"},
     {"id_topic":"961","name_topic":"لبنان","img_url_topic":"http://logo.twoapistack.work/img/topics/ic_flag_lb.png","code":"lb"},
     {"id_topic":"966","name_topic":"السعودية","img_url_topic":"http://logo.twoapistack.work/img/topics/ic_flag_sa.png","code":"sa"},
@@ -432,51 +581,18 @@ const allTopics = [
     {"id_topic":"967","name_topic":"اليمن","img_url_topic":"http://logo.twoapistack.work/img/topics/ic_flag_ye.png","code":"ye"},
     {"id_topic":"973","name_topic":"البحرين","img_url_topic":"http://logo.twoapistack.work/img/topics/ic_flag_bh.png","code":"bh"},
     {"id_topic":"970","name_topic":"فلسطين","img_url_topic":"http://logo.twoapistack.work/img/topics/ic_flag_ps.png","code":"ps"},
-    {"id_topic":"249","name_topic":"السودان","img_url_topic":"http://logo.twoapistack.work/img/topics/ic_flag_sd.png","code":"sd"},
-    {"id_topic":"216","name_topic":"تونس","img_url_topic":"http://logo.twoapistack.work/img/topics/ic_flag_tn.png","code":"tn"},
-    {"id_topic":"212","name_topic":"المغرب","img_url_topic":"http://logo.twoapistack.work/img/topics/ic_flag_ma.png","code":"ma"},
-    {"id_topic":"213","name_topic":"الجزائر","img_url_topic":"http://logo.twoapistack.work/img/topics/ic_flag_dz.png","code":"dz"},
-    {"id_topic":"218","name_topic":"ليبيا","img_url_topic":"http://logo.twoapistack.work/img/topics/ic_flag_ly.png","code":"ly"},
-    {"id_topic":"252","name_topic":"الصومال","img_url_topic":"http://logo.twoapistack.work/img/topics/ic_flag_so.png","code":"so"},
-    {"id_topic":"355","name_topic":"Albania","img_url_topic":"http://logo.twoapistack.work/img/topics/ic_flag_al.png","code":"al"},
-    {"id_topic":"93","name_topic":"Afghanistan","img_url_topic":"http://logo.twoapistack.work/img/topics/ic_flag_af.png","code":"af"},
-    {"id_topic":"376","name_topic":"Andorra","img_url_topic":"http://logo.twoapistack.work/img/topics/ic_flag_ad.png","code":"ad"},
-    {"id_topic":"54","name_topic":"Argentina","img_url_topic":"http://logo.twoapistack.work/img/topics/ic_flag_ar.png","code":"ar"},
-    {"id_topic":"374","name_topic":"Armenia","img_url_topic":"http://logo.twoapistack.work/img/topics/ic_flag_am.png","code":"am"},
-    {"id_topic":"297","name_topic":"Aruba","img_url_topic":"http://logo.twoapistack.work/img/topics/ic_flag_aw.png","code":"aw"},
-    {"id_topic":"61","name_topic":"Australia","img_url_topic":"http://logo.twoapistack.work/img/topics/ic_flag_au.png","code":"au"},
-    {"id_topic":"az","name_topic":"Azerbaijan","img_url_topic":"http://logo.twoapistack.work/img/topics/ic_flag_az.png","code":"az"},
-    {"id_topic":"bs","name_topic":"Bahamas","img_url_topic":"http://logo.twoapistack.work/img/topics/ic_flag_bs.png","code":"bs"},
-    {"id_topic":"bd","name_topic":"Bangladesh","img_url_topic":"http://logo.twoapistack.work/img/topics/ic_flag_bd.png","code":"bd"},
-    {"id_topic":"bb","name_topic":"Barbados","img_url_topic":"http://logo.twoapistack.work/img/topics/ic_flag_bb.png","code":"bb"},
-    {"id_topic":"by","name_topic":"Belarus","img_url_topic":"http://logo.twoapistack.work/img/topics/ic_flag_by.png","code":"by"},
-    {"id_topic":"0_be_0","name_topic":"Belgium","img_url_topic":"http://logo.twoapistack.work/img/topics/ic_flag_be.png","code":"be"},
-    {"id_topic":"bz","name_topic":"Belize","img_url_topic":"http://logo.twoapistack.work/img/topics/ic_flag_bz.png","code":"bz"},
-    {"id_topic":"bj","name_topic":"Benin","img_url_topic":"http://logo.twoapistack.work/img/topics/ic_flag_bj.png","code":"bj"},
-    {"id_topic":"bm","name_topic":"Bermuda","img_url_topic":"http://logo.twoapistack.work/img/topics/ic_flag_bm.png","code":"bm"},
-    {"id_topic":"bt","name_topic":"Bhutan","img_url_topic":"http://logo.twoapistack.work/img/topics/ic_flag_bt.png","code":"bt"},
-    {"id_topic":"bo","name_topic":"Bolivia","img_url_topic":"http://logo.twoapistack.work/img/topics/ic_flag_bo.png","code":"bo"},
-    {"id_topic":"ba","name_topic":"Bosnia And Herzegovina","img_url_topic":"http://logo.twoapistack.work/img/topics/ic_flag_ba.png","code":"ba"},
-    {"id_topic":"bw","name_topic":"Botswana","img_url_topic":"http://logo.twoapistack.work/img/topics/ic_flag_bw.png","code":"bw"},
-    {"id_topic":"bv","name_topic":"Bouvet Island","img_url_topic":"http://logo.twoapistack.work/img/topics/ic_flag_bv.png","code":"bv"},
-    {"id_topic":"br","name_topic":"Brazil","img_url_topic":"http://logo.twoapistack.work/img/topics/ic_flag_br.png","code":"br"},
-    {"id_topic":"io","name_topic":"British Indian Ocean Territory","img_url_topic":"http://logo.twoapistack.work/img/topics/ic_flag_io.png","code":"io"},
-    {"id_topic":"bn","name_topic":"Brunei Darussalam","img_url_topic":"http://logo.twoapistack.work/img/topics/ic_flag_bn.png","code":"bn"},
-    {"id_topic":"bg","name_topic":"Bulgaria","img_url_topic":"http://logo.twoapistack.work/img/topics/ic_flag_bg.png","code":"bg"},
-    {"id_topic":"bf","name_topic":"Burkina Faso","img_url_topic":"http://logo.twoapistack.work/img/topics/ic_flag_bf.png","code":"bf"},
-    {"id_topic":"0_bi_0","name_topic":"Burundi","img_url_topic":"http://logo.twoapistack.work/img/topics/ic_flag_bi.png","code":"bi"},
-    {"id_topic":"kh","name_topic":"Cambodia","img_url_topic":"http://logo.twoapistack.work/img/topics/ic_flag_kh.png","code":"kh"},
-    {"id_topic":"cm","name_topic":"Cameroon","img_url_topic":"http://logo.twoapistack.work/img/topics/ic_flag_cm.png","code":"cm"},
-    {"id_topic":"ca","name_topic":"Canada","img_url_topic":"http://logo.twoapistack.work/img/topics/ic_flag_ca.png","code":"ca"},
-    {"id_topic":"cv","name_topic":"Cape Verde","img_url_topic":"http://logo.twoapistack.work/img/topics/ic_flag_cv.png","code":"cv"},
-    {"id_topic":"ky","name_topic":"Cayman Islands","img_url_topic":"http://logo.twoapistack.work/img/topics/ic_flag_ky.png","code":"ky"},
-    {"id_topic":"cf","name_topic":"Central African Republic","img_url_topic":"http://logo.twoapistack.work/img/topics/ic_flag_cf.png","code":"cf"},
-    {"id_topic":"td","name_topic":"Chad","img_url_topic":"http://logo.twoapistack.work/img/topics/ic_flag_td.png","code":"td"},
-    {"id_topic":"cl","name_topic":"Chile","img_url_topic":"http://logo.twoapistack.work/img/topics/ic_flag_cl.png","code":"cl"},
-    {"id_topic":"cn","name_topic":"China","img_url_topic":"http://logo.twoapistack.work/img/topics/ic_flag_cn.png","code":"cn"}
+    {"id_topic":"249","name_topic":"السودان","img_url_topic":"http://logo.twoapistack.work/img/topics/ic_flag_sd.png","code":""},
+    {"id_topic":"216","name_topic":"تونس","img_url_topic":"http://logo.twoapistack.work/img/topics/ic_flag_tn.png","code":""},
+    {"id_topic":"212","name_topic":"المغرب","img_url_topic":"http://logo.twoapistack.work/img/topics/ic_flag_ma.png","code":""},
+    {"id_topic":"213","name_topic":"الجزائر","img_url_topic":"http://logo.twoapistack.work/img/topics/ic_flag_dz.png","code":""},
+    {"id_topic":"218","name_topic":"ليبيا","img_url_topic":"http://logo.twoapistack.work/img/topics/ic_flag_ly.png","code":""},
+    {"id_topic":"252","name_topic":"الصومال","img_url_topic":"http://logo.twoapistack.work/img/topics/ic_flag_so.png","code":""}
 ];
 
+app.get("/get-all-topics", (req, res) => {
+    res.json(allTopics);
+});
 
-app.get("/get-all-topics", (req, res) => res.json(allTopics));
-
-app.listen(PORT, () => console.log("Server is running on port " + PORT));
+app.listen(PORT, () => {
+    console.log("Server is running on port " + PORT);
+});
