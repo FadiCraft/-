@@ -57,11 +57,9 @@ function convertFakeUrlToRealUrl(fakeUrl, channelId) {
 }
 
 // ==========================================
-// 🆕 دالة: الخطوة الأولى - getLiveByRedirect
+// 🆕 دالة: إرسال طلب عام (مع نوع agent)
 // ==========================================
-async function step1_Redirect(channelId, fakeUrl) {
-    const realUrl = convertFakeUrlToRealUrl(fakeUrl, channelId);
-    
+async function sendRequest(channelId, urlData, agent, rawData = "", endpoint = "getLiveByRedirect") {
     const postData = {
         "user_id": "_82668_1785761367217_notloggedin.com_dramalive3",
         "device_id": "e603540e-ed93-47a3-bec6-a15f7f056604",
@@ -79,15 +77,15 @@ async function step1_Redirect(channelId, fakeUrl) {
         "appCount": "{\"adsFailed\":73,\"adsLoaded\":56,\"adsShowed\":17,\"runCount\":8}",
         "mainServer": "http://main.eastgoessouth.online/api/live/livedrama/v13.0.0/",
         "id": channelId,
-        "url": realUrl,
-        "agent": "redirect",
-        "raw_data": ""
+        "url": urlData,
+        "agent": agent,
+        "raw_data": rawData
     };
 
     const encryptedBody = encryptAES(JSON.stringify(postData));
 
     const response = await axios.post(
-        "http://redirect.1spbgmu.com/redirect/getLiveByRedirect",
+        `http://redirect.1spbgmu.com/redirect/${endpoint}`,
         encryptedBody,
         {
             headers: {
@@ -115,123 +113,108 @@ async function step1_Redirect(channelId, fakeUrl) {
 }
 
 // ==========================================
-// 🆕 دالة: الخطوة الثانية - getLiveByDoubleRedirect
+// 🆕 دالة: استخراج الرابط خطوة بخطوة حسب agent
 // ==========================================
-async function step2_DoubleRedirect(channelId, dataFromStep1) {
-    // نستخدم data.url من الرد الأول كـ url للطلب الثاني
-    const urlForStep2 = dataFromStep1.data.url;
-    const agentForStep2 = dataFromStep1.data.agent || "advanced";
+async function extractStreamUrl(channelId, initialUrl) {
+    let currentUrl = initialUrl;
+    let currentAgent = "redirect"; // البداية دايمًا redirect
+    let steps = [];
+    let finalUrl = null;
+    let maxSteps = 5; // أمان - لا أكثر من 5 خطوات
 
-    const postData = {
-        "user_id": "_82668_1785761367217_notloggedin.com_dramalive3",
-        "device_id": "e603540e-ed93-47a3-bec6-a15f7f056604",
-        "device_api": "28",
-        "version_name": "187",
-        "language": "ar",
-        "timezone": "Europe/Istanbul",
-        "device_type": "phone",
-        "KEY_ACTIVATED_TYPE": "232425",
-        "store": "direct",
-        "isStoreVersion": false,
-        "isPremium": false,
-        "isCoupon_active": false,
-        "hideAds": false,
-        "appCount": "{\"adsFailed\":73,\"adsLoaded\":56,\"adsShowed\":17,\"runCount\":8}",
-        "mainServer": "http://main.eastgoessouth.online/api/live/livedrama/v13.0.0/",
-        "id": channelId,
-        "url": urlForStep2,
-        "agent": agentForStep2,
-        "raw_data": ""
-    };
-
-    const encryptedBody = encryptAES(JSON.stringify(postData));
-
-    const response = await axios.post(
-        "http://redirect.1spbgmu.com/redirect/getLiveByDoubleRedirect",
-        encryptedBody,
-        {
-            headers: {
-                "Content-Type": "text/plain",
-                "User-Agent": "Dalvik/2.1.0 (Linux; U; Android 9; SM-S908E Build/TP1A.220624.014)",
-                "Host": "redirect.1spbgmu.com",
-                "Connection": "Keep-Alive",
-                "Accept-Encoding": "gzip"
-            },
-            timeout: 15000,
-            responseType: "arraybuffer"
-        }
-    );
-
-    const encryptedResponse = Buffer.from(response.data).toString("utf-8");
-    const decryptedResponse = decryptAES(encryptedResponse);
-    const jsonResponse = JSON.parse(decryptedResponse);
-
-    return {
-        encrypted_body: encryptedBody,
-        encrypted_response: encryptedResponse,
-        decrypted_body: postData,
-        decrypted_response: jsonResponse
-    };
-}
-
-// ==========================================
-// 🆕 مسار: /test-redirect (خطوة واحدة فقط)
-// ==========================================
-app.get("/test-redirect", async (req, res) => {
-    try {
-        const targetUrl = req.query.url;
-        const channelId = req.query.id_live || "test";
+    while (maxSteps > 0) {
+        maxSteps--;
         
-        if (!targetUrl) {
-            return res.status(400).json({ error: true, message: "يرجى إرسال الرابط (url)" });
+        // 🔹 تحويل الرابط إذا كان LS.V2
+        let urlToSend = currentUrl;
+        if (currentUrl.includes(".LS.V2") && currentUrl.endsWith("/s")) {
+            urlToSend = convertFakeUrlToRealUrl(currentUrl, channelId);
         }
 
-        console.log("🔄 [Step 1] تجربة getLiveByRedirect...");
-        const step1 = await step1_Redirect(channelId, targetUrl);
+        let endpoint;
+        if (currentAgent === "double_redirect") {
+            endpoint = "getLiveByDoubleRedirect";
+        } else {
+            endpoint = "getLiveByRedirect";
+        }
+
+        console.log(`🔄 [${currentAgent}] -> ${endpoint}`);
         
-        res.json({
-            success: true,
-            step: 1,
-            result: step1
+        const result = await sendRequest(channelId, urlToSend, currentAgent, "", endpoint);
+        
+        steps.push({
+            agent_sent: currentAgent,
+            endpoint: endpoint,
+            decrypted_response: result.decrypted_response
         });
 
-    } catch (error) {
-        res.status(500).json({ success: false, error: true, message: error.message });
-    }
-});
-
-// ==========================================
-// 🆕 مسار: /test-redirect-full (خطوتين مع بعض)
-// ==========================================
-app.get("/test-redirect-full", async (req, res) => {
-    try {
-        const targetUrl = req.query.url;
-        const channelId = req.query.id_live || "test";
+        const data = result.decrypted_response.data;
         
-        if (!targetUrl) {
-            return res.status(400).json({ error: true, message: "يرجى إرسال الرابط (url)" });
+        if (!data || !data.url) {
+            // مفيش data.url - خلاص وصلنا للنهاية
+            finalUrl = null;
+            break;
         }
 
-        console.log("🔄 [Step 1] تجربة getLiveByRedirect...");
-        const step1 = await step1_Redirect(channelId, targetUrl);
+        // 🔹 تحديد agent الجديد من الرد
+        const newAgent = data.agent || "stop";
         
-        console.log("📦 Step 1 agent:", step1.decrypted_response.data?.agent);
-        console.log("🔄 [Step 2] إرسال الرد لـ getLiveByDoubleRedirect...");
-        
-        const step2 = await step2_DoubleRedirect(channelId, step1.decrypted_response);
-
-        res.json({
-            success: true,
-            step1: {
-                decrypted_response: step1.decrypted_response
-            },
-            step2: {
-                encrypted_body: step2.encrypted_body,
-                encrypted_response: step2.encrypted_response,
-                decrypted_body: step2.decrypted_body,
-                decrypted_response: step2.decrypted_response
+        if (newAgent === "stop" || newAgent === "advanced") {
+            // agent = advanced ➔ خلاص هذا الرابط النهائي
+            // نفك data.url إذا كان JSON
+            try {
+                const innerData = JSON.parse(data.url);
+                finalUrl = innerData.url || data.url;
+            } catch (e) {
+                finalUrl = data.url;
             }
-        });
+            break;
+        }
+        
+        if (newAgent === "redirect" || newAgent === "double_redirect") {
+            // نحتاج خطوة إضافية
+            currentUrl = data.url; // نستخدم data.url كما هو
+            currentAgent = newAgent;
+            continue;
+        }
+        
+        // أي agent تاني ➔ خلاص
+        try {
+            const innerData = JSON.parse(data.url);
+            finalUrl = innerData.url || data.url;
+        } catch (e) {
+            finalUrl = data.url;
+        }
+        break;
+    }
+
+    return {
+        success: finalUrl ? true : false,
+        final_url: finalUrl,
+        steps: steps,
+        total_steps: steps.length
+    };
+}
+
+// ==========================================
+// 🆕 مسار: /extract - يحل الرابط كامل
+// ==========================================
+app.get("/extract", async (req, res) => {
+    try {
+        const targetUrl = req.query.url;
+        const channelId = req.query.id_live || "test";
+        
+        if (!targetUrl) {
+            return res.status(400).json({ error: true, message: "يرجى إرسال الرابط (url)" });
+        }
+
+        console.log("🚀 بدء استخراج الرابط...");
+        console.log("📌 الرابط:", targetUrl);
+        console.log("📌 id_live:", channelId);
+
+        const result = await extractStreamUrl(channelId, targetUrl);
+        
+        res.json(result);
 
     } catch (error) {
         res.status(500).json({ success: false, error: true, message: error.message });
@@ -725,5 +708,5 @@ app.get("/get-all-topics", (req, res) => {
 });
 
 app.listen(PORT, () => {
-    console.log("Server is running on port " + PORT);
+    console.log("🚀 Server is running on port " + PORT);
 });
