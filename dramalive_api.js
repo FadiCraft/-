@@ -107,8 +107,8 @@ async function sendRequest(channelId, urlData, agent, rawData = "", endpoint = "
     return {
         encrypted_body: encryptedBody,
         encrypted_response: encryptedResponse,
-        decrypted_body: postData,
-        decrypted_response: jsonResponse
+        decrypted_body: postData, // الطلب كما هو
+        decrypted_response: jsonResponse // الرد كما هو
     };
 }
 
@@ -117,13 +117,15 @@ async function sendRequest(channelId, urlData, agent, rawData = "", endpoint = "
 // ==========================================
 async function extractStreamUrl(channelId, initialUrl) {
     let currentUrl = initialUrl;
-    let currentAgent = "redirect"; // البداية دايمًا redirect
+    let currentAgent = "redirect"; 
     let steps = [];
     let finalUrl = null;
-    let maxSteps = 5; // أمان - لا أكثر من 5 خطوات
+    let maxSteps = 5; 
+    let stepCount = 0;
 
     while (maxSteps > 0) {
         maxSteps--;
+        stepCount++;
         
         // 🔹 تحويل الرابط إذا كان LS.V2
         let urlToSend = currentUrl;
@@ -131,27 +133,37 @@ async function extractStreamUrl(channelId, initialUrl) {
             urlToSend = convertFakeUrlToRealUrl(currentUrl, channelId);
         }
 
+        // 🔹 توجيه الطلب الثاني لـ DoubleRedirect كما طلبت
         let endpoint;
-        if (currentAgent === "double_redirect") {
+        if (currentAgent === "double_redirect" || stepCount > 1) {
             endpoint = "getLiveByDoubleRedirect";
         } else {
             endpoint = "getLiveByRedirect";
         }
 
-        console.log(`🔄 [${currentAgent}] -> ${endpoint}`);
-        
         const result = await sendRequest(channelId, urlToSend, currentAgent, "", endpoint);
         
+        // ========================================================
+        // 🚀 هنا يتم طباعة الطلب والرد كما هما بالضبط في الكونسول
+        // ========================================================
+        console.log(`\n================= الخطوة رقم ${stepCount} =================`);
+        console.log(`🔗 المسار: ${endpoint}`);
+        console.log(`📤 الطلب المُرسل:\n${JSON.stringify(result.decrypted_body)}`);
+        console.log(`📥 الرد المُستقبل:\n${JSON.stringify(result.decrypted_response)}`);
+        console.log(`====================================================\n`);
+
         steps.push({
+            step_number: stepCount,
             agent_sent: currentAgent,
             endpoint: endpoint,
-            decrypted_response: result.decrypted_response
+            request_sent: result.decrypted_body,       // تم إضافته ليعرض لك الطلب في المتصفح
+            response_received: result.decrypted_response // الرد الذي وصل
         });
 
-        const data = result.decrypted_response.data;
+        // قد يكون الـ url داخل data أو في الرد مباشرة
+        const data = result.decrypted_response.data || result.decrypted_response;
         
         if (!data || !data.url) {
-            // مفيش data.url - خلاص وصلنا للنهاية
             finalUrl = null;
             break;
         }
@@ -160,8 +172,6 @@ async function extractStreamUrl(channelId, initialUrl) {
         const newAgent = data.agent || "stop";
         
         if (newAgent === "stop" || newAgent === "advanced") {
-            // agent = advanced ➔ خلاص هذا الرابط النهائي
-            // نفك data.url إذا كان JSON
             try {
                 const innerData = JSON.parse(data.url);
                 finalUrl = innerData.url || data.url;
@@ -172,13 +182,11 @@ async function extractStreamUrl(channelId, initialUrl) {
         }
         
         if (newAgent === "redirect" || newAgent === "double_redirect") {
-            // نحتاج خطوة إضافية
-            currentUrl = data.url; // نستخدم data.url كما هو
-            currentAgent = newAgent;
+            currentUrl = data.url;
+            currentAgent = "double_redirect"; // الطلب الثاني سيكون double_redirect
             continue;
         }
         
-        // أي agent تاني ➔ خلاص
         try {
             const innerData = JSON.parse(data.url);
             finalUrl = innerData.url || data.url;
@@ -660,47 +668,7 @@ app.all("/resolve", async (req, res) => {
 // قائمة الأقسام
 const allTopics = [
     {"id_topic":"hot_now","name_topic":"الأكثر مشاهدة","img_url_topic":"http://logo.twoapistack.work/img/topics/hot_now.png","code":""},
-    {"id_topic":"alwan","name_topic":"الوان","img_url_topic":"http://logo.twoapistack.work/img/topics/alwan.jpg","code":""},
-    {"id_topic":"shahid","name_topic":"شاهد","img_url_topic":"http://logo.twoapistack.work/img/topics/shahid.jpg","code":""},
-    {"id_topic":"arabic_sport","name_topic":"رياضة","img_url_topic":"http://logo.twoapistack.work/img/topics/ic_basketball_red.png","code":""},
-    {"id_topic":"ar_1","name_topic":"ترفيه عربي","img_url_topic":"http://logo.twoapistack.work/img/topics/ic_featured_ar.png","code":""},
-    {"id_topic":"ar_2","name_topic":"أخبار","img_url_topic":"http://logo.twoapistack.work/img/topics/ic_newspaper.png","code":""},
-    {"id_topic":"ar_3","name_topic":"أطفال","img_url_topic":"http://logo.twoapistack.work/img/topics/ic_kids.jpg","code":""},
-    {"id_topic":"ar_5","name_topic":"وثائقي","img_url_topic":"http://logo.twoapistack.work/img/topics/ic_documantry.png","code":""},
-    {"id_topic":"ar_6","name_topic":"ديني","img_url_topic":"http://logo.twoapistack.work/img/topics/ic__mosque.png","code":""},
-    {"id_topic":"ar_7","name_topic":"أفلام","img_url_topic":"http://logo.twoapistack.work/img/topics/ic_film.png","code":""},
-    {"id_topic":"ar_8","name_topic":"موسيقى","img_url_topic":"http://logo.twoapistack.work/img/topics/ic_music.jpg","code":""},
-    {"id_topic":"art","name_topic":"ART","img_url_topic":"http://logo.twoapistack.work/img/topics/art.png","code":""},
-    {"id_topic":"osn","name_topic":"OSN","img_url_topic":"http://logo.twoapistack.work/img/topics/osn_logo.png","code":""},
-    {"id_topic":"netflix","name_topic":"NETFLIX","img_url_topic":"http://logo.twoapistack.work/img/topics/netflix.jpg","code":""},
-    {"id_topic":"mbc","name_topic":"MBC","img_url_topic":"http://logo.twoapistack.work/img/topics/mpc.jpg","code":""},
-    {"id_topic":"rotana","name_topic":"روتانا","img_url_topic":"http://logo.twoapistack.work/img/topics/rotana.jpg","code":""},
-    {"id_topic":"cook","name_topic":"الطبخ","img_url_topic":"http://logo.twoapistack.work/img/topics/ic_chef.png","code":""},
-    {"id_topic":"weyyak","name_topic":"وياك","img_url_topic":"http://logo.twoapistack.work/img/topics/weyyak.jpg","code":""},
-    {"id_topic":"bein_entir","name_topic":"بي ان ترفيه","img_url_topic":"http://logo.twoapistack.work/img/topics/bein_enter.jpg","code":""},
-    {"id_topic":"bein_sport","name_topic":"بي ان سبورت","img_url_topic":"http://logo.twoapistack.work/img/topics/bein_sport.png","code":""},
-    {"id_topic":"science","name_topic":"علوم","img_url_topic":"http://logo.twoapistack.work/img/topics/science.png","code":""},
-    {"id_topic":"anime","name_topic":"انيمي","img_url_topic":"http://logo.twoapistack.work/img/topics/anime.jpg","code":""},
-    {"id_topic":"roya","name_topic":"رؤيا","img_url_topic":"https://backend.roya-tv.com/imagechanger/Size01Q40R11/images/channels/iMoPuU3u5qnqMsL.png","code":""},
-    {"id_topic":"963","name_topic":"سوريا","img_url_topic":"http://logo.twoapistack.work/img/topics/ic_flag_sy.png","code":"sy"},
-    {"id_topic":"961","name_topic":"لبنان","img_url_topic":"http://logo.twoapistack.work/img/topics/ic_flag_lb.png","code":"lb"},
-    {"id_topic":"966","name_topic":"السعودية","img_url_topic":"http://logo.twoapistack.work/img/topics/ic_flag_sa.png","code":"sa"},
-    {"id_topic":"20","name_topic":"مصر","img_url_topic":"http://logo.twoapistack.work/img/topics/ic_flag_eg.png","code":"eg"},
-    {"id_topic":"971","name_topic":"الإمارات","img_url_topic":"http://logo.twoapistack.work/img/topics/ic_flag_ae.png","code":"ae"},
-    {"id_topic":"962","name_topic":"الأردن","img_url_topic":"http://logo.twoapistack.work/img/topics/ic_flag_jo.png","code":"jo"},
-    {"id_topic":"974","name_topic":"قطر","img_url_topic":"http://logo.twoapistack.work/img/topics/ic_flag_qa.png","code":"qa"},
-    {"id_topic":"964","name_topic":"العراق","img_url_topic":"http://logo.twoapistack.work/img/topics/ic_flag_iq.png","code":"iq"},
-    {"id_topic":"965","name_topic":"الكويت","img_url_topic":"http://logo.twoapistack.work/img/topics/ic_flag_kw.png","code":"kw"},
-    {"id_topic":"968","name_topic":"عُمان","img_url_topic":"http://logo.twoapistack.work/img/topics/ic_flag_om.png","code":"om"},
-    {"id_topic":"967","name_topic":"اليمن","img_url_topic":"http://logo.twoapistack.work/img/topics/ic_flag_ye.png","code":"ye"},
-    {"id_topic":"973","name_topic":"البحرين","img_url_topic":"http://logo.twoapistack.work/img/topics/ic_flag_bh.png","code":"bh"},
-    {"id_topic":"970","name_topic":"فلسطين","img_url_topic":"http://logo.twoapistack.work/img/topics/ic_flag_ps.png","code":"ps"},
-    {"id_topic":"249","name_topic":"السودان","img_url_topic":"http://logo.twoapistack.work/img/topics/ic_flag_sd.png","code":""},
-    {"id_topic":"216","name_topic":"تونس","img_url_topic":"http://logo.twoapistack.work/img/topics/ic_flag_tn.png","code":""},
-    {"id_topic":"212","name_topic":"المغرب","img_url_topic":"http://logo.twoapistack.work/img/topics/ic_flag_ma.png","code":""},
-    {"id_topic":"213","name_topic":"الجزائر","img_url_topic":"http://logo.twoapistack.work/img/topics/ic_flag_dz.png","code":""},
-    {"id_topic":"218","name_topic":"ليبيا","img_url_topic":"http://logo.twoapistack.work/img/topics/ic_flag_ly.png","code":""},
-    {"id_topic":"252","name_topic":"الصومال","img_url_topic":"http://logo.twoapistack.work/img/topics/ic_flag_so.png","code":""}
+    {"id_topic":"alwan","name_topic":"الوان","img_url_topic":"http://logo.twoapistack.work/img/topics/alwan.jpg","code":""}
 ];
 
 app.get("/get-all-topics", (req, res) => {
