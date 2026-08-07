@@ -510,8 +510,7 @@ app.get("/ref", async (req, res) => {
         }
 
         // 1. تحويل الرابط الوهمي إلى التركيبة الصحيحة باستخدام الدالة الموجودة
-        const realUrl = convertFakeUrlToRealUrl(targetUrl, channelId);
-
+const realUrl = targetUrl; // إرسال الرابط الخام مباشرة دون تحويله إلى JSON
         // 2. تجهيز البيانات (نفس البيانات ولكن لاحظ agent: redirect)
         const postData = {
             "user_id": "_82668_1785761367217_notloggedin.com_dramalive3",
