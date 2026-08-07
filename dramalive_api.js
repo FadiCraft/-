@@ -496,12 +496,10 @@ app.get("/stream", async (req, res) => {
 });
 
 // ==========================================
-// 🚨 المسار التجريبي الجديد الذي طلبته خطوة بخطوة 🚨
+// 🚨 المسار التجريبي المحدث بناءً على التقاطك للبيانات 🚨
 // ==========================================
 app.get("/ref", async (req, res) => {
     try {
-        // يمكنك تمرير الرابط في المتصفح هكذا:
-        // /ref?url=http://.LS.V2live_tv_custom_handler_alwan1_description_DL_/s&id_live=live_tv_panel_...
         const targetUrl = req.query.url;
         const channelId = req.query.id_live || "live_tv_panel_985d709fdd1ab07f9f51c32558b49a50"; 
 
@@ -509,9 +507,10 @@ app.get("/ref", async (req, res) => {
             return res.status(400).json({ error: true, message: "الرجاء تمرير الرابط الوهمي (url) في الاستعلام" });
         }
 
-        // 1. تحويل الرابط الوهمي إلى التركيبة الصحيحة باستخدام الدالة الموجودة
-const realUrl = targetUrl; // إرسال الرابط الخام مباشرة دون تحويله إلى JSON
-        // 2. تجهيز البيانات (نفس البيانات ولكن لاحظ agent: redirect)
+        // 1. نرسل الرابط كما هو بالضبط دون أي دالة تحويل
+        const realUrl = targetUrl;
+
+        // 2. تجهيز البيانات مطابقة تماماً لما التقطته من التطبيق
         const postData = {
             "user_id": "_82668_1785761367217_notloggedin.com_dramalive3",
             "device_id": "e603540e-ed93-47a3-bec6-a15f7f056604",
@@ -526,23 +525,23 @@ const realUrl = targetUrl; // إرسال الرابط الخام مباشرة د
             "isPremium": false,
             "isCoupon_active": false,
             "hideAds": false,
-            "appCount": "{\"adsFailed\":73,\"adsLoaded\":56,\"adsShowed\":17,\"runCount\":8}",
+            "appCount": "{\"adsFailed\":162,\"adsLoaded\":112,\"adsShowed\":45,\"runCount\":24}",
             "mainServer": "http://main.eastgoessouth.online/api/live/livedrama/v13.0.0/",
             "id": channelId,
             "url": realUrl,
-            "agent": "redirect", // النوع redirect العادي
-            "raw_data": ""
+            "agent": "redirect"
+            // تم إزالة raw_data لأنه غير موجود في طلب التطبيق
         };
 
         const encryptedBody = encryptAES(JSON.stringify(postData));
 
-        // 3. إرسال الطلب إلى الرابط المخصص للـ redirect العادي
+        // 3. إرسال الطلب مع تعديل الـ Content-Type
         const response = await axios.post(
-            "http://redirect.1spbgmu.com/redirect/getLiveByRedirect", // لاحظ الرابط هنا
+            "http://redirect.1spbgmu.com/redirect/getLiveByRedirect",
             encryptedBody,
             {
                 headers: {
-                    "Content-Type": "text/plain",
+                    "Content-Type": "application/json; charset=utf-8", // تعديل هام بناءً على ملاحظتك
                     "User-Agent": "Dalvik/2.1.0 (Linux; U; Android 9; SM-S908E Build/TP1A.220624.014)",
                     "Host": "redirect.1spbgmu.com",
                     "Connection": "Keep-Alive",
@@ -553,18 +552,13 @@ const realUrl = targetUrl; // إرسال الرابط الخام مباشرة د
             }
         );
 
-        // النص المشفر القادم من السيرفر
         const encryptedResponseText = Buffer.from(response.data).toString("utf-8");
-        
-        // فك التشفير لنتمكن من رؤيته
         const decryptedText = decryptAES(encryptedResponseText);
         const jsonResponse = JSON.parse(decryptedText);
 
-        // 4. عرض النتيجة لك تماماً كما هي (مشفرة ومفكوك تشفيرها) لتتأكد
         res.json({
-            step: "Testing getLiveByRedirect",
+            step: "Testing getLiveByRedirect (Fixed from Sniffing)",
             sent_url: realUrl,
-            encrypted_raw_response: encryptedResponseText,
             decrypted_raw_response: jsonResponse
         });
 
@@ -573,7 +567,6 @@ const realUrl = targetUrl; // إرسال الرابط الخام مباشرة د
         res.status(500).json({ error: true, message: error.message });
     }
 });
-
 
 app.listen(PORT, () => {
     console.log("Server is running on port " + PORT);
