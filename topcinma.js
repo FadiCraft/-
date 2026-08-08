@@ -312,6 +312,59 @@ app.get('/api/watch', async (req, res) => {
     }
 });
 
+
+
+
+
+// ---------------------------------------------------------
+// المسار الرابع: استخراج الحلقة التالية
+// ---------------------------------------------------------
+app.get('/api/next-episode', async (req, res) => {
+    const targetUrl = req.query.url;
+
+    // إرجاع قوسين فارغين إذا لم يتم تمرير رابط
+    if (!targetUrl) return res.json([]);
+
+    try {
+        const response = await fetch(targetUrl, {
+            headers: { "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)" }
+        });
+
+        if (!response.ok) return res.json([]);
+
+        const html = await response.text();
+        const $ = cheerio.load(html);
+
+        // استهداف زر الحلقة التالية
+        const nextElement = $('a.next');
+
+        // التحقق من وجود الحلقة التالية
+        if (nextElement.length > 0) {
+            const nextUrl = nextElement.attr('href') || "";
+            const nextNumber = nextElement.find('strong').text().trim() || "";
+            const nextTitle = nextElement.find('.txtDiv span').text().trim() || "";
+
+            // إذا كان الرابط موجوداً، نقوم بإرجاع البيانات
+            if (nextUrl) {
+                // إعداد الرأس (Header) لدعم اللغة العربية وتنسيق JSON
+                res.setHeader('Content-Type', 'application/json; charset=utf-8');
+                return res.json([{
+                    title: nextTitle,    // اسم الحلقة (مثلاً: الحلقة التالية)
+                    number: nextNumber,  // رقم الحلقة (مثلاً: 2)
+                    url: nextUrl         // رابط الحلقة
+                }]);
+            }
+        }
+
+        // إذا لم يتم العثور على العنصر أو الرابط، يطبع القوسين فقط
+        return res.json([]);
+
+    } catch (error) {
+        console.error("خطأ في استخراج الحلقة التالية:", error.message);
+        return res.json([]);
+    }
+});
+
 // ---------------------------------------------------------
 // تشغيل السيرفر
 // ---------------------------------------------------------
