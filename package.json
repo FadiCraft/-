@@ -10,6 +10,7 @@
     "start": "node dramalive_api.js",
     "build": "npm install",
     "postinstall": "npx puppeteer browsers install chrome",
+    "start:matches": "node Matchs.js",
     "start:drama": "node dramalive_api.js",
     "dev:drama": "nodemon dramalive_api.js",
     "start:scraper": "node server.js",
