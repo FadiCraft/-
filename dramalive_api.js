@@ -43,10 +43,10 @@ function convertFakeUrlToRealUrl(fakeUrl, channelId) {
         realUrl = `{"url":"http://.LS.V2LOAD_BALANCER${cleanId}/s","data":"","acceptSSL":"1","iframe":"","headers":{}}`;
     } else if (extractedPart.includes("custom_handler")) {
         realUrl = `{"url":"${fakeUrl}","data":"","acceptSSL":"1","iframe":"","headers":{}}`;
-    } else if (extractedPart.includes("daddy_")) {
-        const daddyId = extractedPart.replace("daddy_", "");
-        realUrl = `{"url":"https://hamis.romponalis.st/premiumtv/daddy4.php?id=${daddyId}","data":"","acceptSSL":"1","iframe":"https://daddylive.mov/embed/embed.php?id=${daddyId}&player=1&source=tv.json","headers":{"Referer":"https://dlhd.pk/"}}`;
-    } else {
+   } else if (extractedPart.includes("daddy_")) {
+    const daddyId = extractedPart.replace("daddy_", "");
+    realUrl = `{"url":"https://hamis.romponalis.st/premiumtv/daddy4.php?id=${daddyId}","data":"","acceptSSL":"1","iframe":"https://daddylive.mov/embed/embed.php?id=${daddyId}&player=1&source=tv.json","headers":{"Referer":"https://dlhd.pk/","Origin":"https://dlhd.pk","Accept":"*/*"}}`;
+} else {
         realUrl = `{"url":"${fakeUrl}","data":"","acceptSSL":"1","iframe":"","headers":{}}`;
     }
     return realUrl;
