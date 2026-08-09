@@ -636,6 +636,75 @@ app.post("/get-redirect-data", async (req, res) => {
 
 
 
+
+
+
+
+
+
+
+// ==========================================
+// مسار جلب الرد مفكوك التشفير من getLiveByRedirect عبر الرابط مباشرة
+// ==========================================
+app.get("/get-redirect-data", async (req, res) => {
+    try {
+        const id_live = req.query.id_live;
+
+        if (!id_live) {
+            return res.status(400).json({ error: true, message: "يرجى إرسال id_live في الرابط" });
+        }
+
+        console.log(`🔍 جلب الرابط الأساسي لقناة: ${id_live}`);
+
+        // 1. جلب الرابط الأساسي (url) الخاص بالقناة أولاً لكي نرسله في الخطوة التالية
+        const streamsPostData = {
+            "user_id": "_82668_1785761367217_notloggedin.com_dramalive3",
+            "device_id": "e603540e-ed93-47a3-bec6-a15f7f056604",
+            "device_api": "28", "version_name": "187", "language": "ar",
+            "timezone": "Europe/Istanbul", "device_type": "phone",
+            "KEY_ACTIVATED_TYPE": "232425", "store": "direct",
+            "mainServer": "http://main.eastgoessouth.online/api/live/livedrama/v13.0.0/",
+            "type": "tv", "id_live": id_live, "id": id_live, "live_id": id_live, "channel_id": id_live
+        };
+        
+        const encryptedStreamBody = encryptAES(JSON.stringify(streamsPostData));
+        
+        const streamRes = await axios.post("http://live.1spbgmu.com/api/live/livedrama/v13.0.0/getLiveAllStreamsById", encryptedStreamBody, {
+            headers: { "Content-Type": "text/plain", "User-Agent": "Dalvik/2.1.0 (Linux; U; Android 9; SM-S908E Build/TP1A.220624.014)", "Host": "live.1spbgmu.com", "Connection": "Keep-Alive" },
+            responseType: "arraybuffer",
+            timeout: 15000
+        });
+        
+        const decryptedStreamRes = decryptAES(Buffer.from(streamRes.data).toString("utf-8"));
+        const streamJson = JSON.parse(decryptedStreamRes);
+        const url = streamJson.live?.url;
+
+        if (!url || url === "empty") {
+            return res.status(404).json({ error: true, message: "لم يتم العثور على رابط أساسي لهذه القناة" });
+        }
+
+        console.log(`🚀 إرسال الطلب إلى getLiveByRedirect...`);
+
+        // 2. إرسال الطلب إلى getLiveByRedirect باستخدام دالة sendRequest الموجودة عندك
+        const result = await sendRequest(id_live, url, "redirect", "", "getLiveByRedirect");
+
+        // 3. إرجاع الرد مفكوك التشفير (JSON الصافي كما طلبته)
+        res.json(result.decrypted_response);
+
+    } catch (error) {
+        res.status(500).json({ error: true, message: error.message });
+    }
+});
+
+
+
+
+
+
+
+
+
+
 // ==========================================
 // 3. /resolve و /extract
 // ==========================================
