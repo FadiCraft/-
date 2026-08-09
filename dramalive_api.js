@@ -571,6 +571,79 @@ app.get("/stream", async (req, res) => {
     } catch (error) { res.status(500).json({ error: true, message: error.message }); }
 });
 
+
+// ==========================================
+// مسار جديد: جلب الـ Body المشفر من getLiveByRedirect
+// ==========================================
+app.all("/raw-redirect", async (req, res) => {
+    try {
+        const channelId = req.query.id_live || req.body.id_live || "test";
+        const urlData = req.query.url || req.body.url;
+        const agent = req.query.agent || req.body.agent || "redirect";
+        const encryptedRawData = req.query.raw_data || req.body.raw_data || "";
+
+        if (!urlData) {
+            return res.status(400).json({ error: true, message: "يرجى إرسال الرابط (url)" });
+        }
+
+        const postData = {
+            "user_id": "_82668_1785761367217_notloggedin.com_dramalive3",
+            "device_id": "e603540e-ed93-47a3-bec6-a15f7f056604",
+            "device_api": "28",
+            "version_name": "187",
+            "language": "ar",
+            "timezone": "Europe/Istanbul",
+            "device_type": "phone",
+            "KEY_ACTIVATED_TYPE": "232425",
+            "store": "direct",
+            "isStoreVersion": false,
+            "isPremium": false,
+            "isCoupon_active": false,
+            "hideAds": false,
+            "appCount": "{\"adsFailed\":73,\"adsLoaded\":56,\"adsShowed\":17,\"runCount\":8}",
+            "mainServer": "http://main.eastgoessouth.online/api/live/livedrama/v13.0.0/",
+            "id": channelId,
+            "url": urlData,
+            "agent": agent,
+            "raw_data": encryptedRawData
+        };
+
+        const encryptedBody = encryptAES(JSON.stringify(postData));
+
+        const response = await axios.post(
+            "http://redirect.1spbgmu.com/redirect/getLiveByRedirect",
+            encryptedBody,
+            {
+                headers: {
+                    "Content-Type": "text/plain",
+                    "User-Agent": "Dalvik/2.1.0 (Linux; U; Android 9; SM-S908E Build/TP1A.220624.014)",
+                    "Host": "redirect.1spbgmu.com",
+                    "Connection": "Keep-Alive",
+                    "Accept-Encoding": "gzip"
+                },
+                timeout: 15000,
+                responseType: "arraybuffer"
+            }
+        );
+
+        // تحويل الـ buffer إلى نص مشفر فقط بدون استخدام decryptAES
+        const encryptedResponse = Buffer.from(response.data).toString("utf-8");
+
+        // إرجاع النص المشفر
+        res.json({
+            success: true,
+            encrypted_body: encryptedResponse
+        });
+
+    } catch (error) { 
+        res.status(500).json({ error: true, message: error.message }); 
+    }
+});
+
+
+
+
+
 // ==========================================
 // 3. /resolve و /extract
 // ==========================================
