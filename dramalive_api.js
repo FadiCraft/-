@@ -505,8 +505,10 @@ app.get("/channels", async (req, res) => {
     } catch (error) { res.status(500).json({ error: true, message: error.message }); }
 });
 
+
+
 // ==========================================
-// 2. 🆕 مسار /stream
+// 2. 🆕 مسار /stream (معدل مع الفرز وإعادة التسمية)
 // ==========================================
 app.get("/stream", async (req, res) => {
     try {
@@ -542,7 +544,8 @@ app.get("/stream", async (req, res) => {
         const mainUrl = liveData.url || "";
         const mainAgent = liveData.agent || "";
         if (mainUrl && mainUrl !== "empty") {
-            const server = await processServer(id_live, "السيرفر الأساسي", mainUrl, mainAgent);
+            // نمرر اسماً مؤقتاً هنا لأننا سنعيد التسمية لاحقاً
+            const server = await processServer(id_live, "temp", mainUrl, mainAgent);
             parsedStreams.push(server);
         }
 
@@ -556,10 +559,32 @@ app.get("/stream", async (req, res) => {
                 const linkData = subParts[0] ? subParts[0].trim() : "";
                 const agentData = subParts[1] ? subParts[1].trim() : "";
                 if (!linkData || linkData === "empty") continue;
-                const server = await processServer(id_live, `سيرفر ${parsedStreams.length + 1}`, linkData, agentData);
+                // نمرر اسماً مؤقتاً
+                const server = await processServer(id_live, "temp", linkData, agentData);
                 parsedStreams.push(server);
             }
         }
+
+        // 🎯 1. فرز السيرفرات حسب الأولوية (.mpd ثم .m3u8 ثم الباقي ثم الفارغ)
+        parsedStreams.sort((a, b) => {
+            const urlA = (a.url || "").toLowerCase();
+            const urlB = (b.url || "").toLowerCase();
+
+            // دالة تحديد الأولوية (الرقم الأقل يعني أولوية أعلى)
+            const getPriority = (url) => {
+                if (!url) return 4;                     // الروابط الفارغة تأخذ أقل أولوية
+                if (url.includes(".mpd")) return 1;     // MPD في المركز الأول
+                if (url.includes(".m3u8")) return 2;    // M3U8 في المركز الثاني
+                return 3;                               // أي روابط أخرى في المركز الثالث
+            };
+
+            return getPriority(urlA) - getPriority(urlB);
+        });
+
+        // 🎯 2. إعادة التسمية بالتسلسل (سيرفر 1، سيرفر 2، ...)
+        parsedStreams.forEach((stream, index) => {
+            stream.server_name = `سيرفر ${index + 1}`;
+        });
 
         res.json({
             id_live: liveData.id_live || id_live,
@@ -570,8 +595,6 @@ app.get("/stream", async (req, res) => {
 
     } catch (error) { res.status(500).json({ error: true, message: error.message }); }
 });
-
-
 
 
 
