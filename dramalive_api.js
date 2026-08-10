@@ -842,8 +842,6 @@ app.get("/live_id/:id_live", async (req, res) => {
 
 
 
-
-
 // ==========================================
 // 4. مسار جلب المباريات (مفكوك التشفير ومبسط)
 // ==========================================
@@ -851,7 +849,6 @@ app.get("/mach", async (req, res) => {
     try {
         console.log(`⚽ جلب بيانات المباريات...`);
 
-        // 1. تجهيز البيانات الأساسية للطلب (نفس المستخدمة في باقي التطبيق)
         const postData = {
             "user_id": "_82668_1785761367217_notloggedin.com_dramalive3",
             "device_id": "e603540e-ed93-47a3-bec6-a15f7f056604",
@@ -869,12 +866,10 @@ app.get("/mach", async (req, res) => {
             "appCount": "{\"adsFailed\":73,\"adsLoaded\":56,\"adsShowed\":17,\"runCount\":8}",
             "mainServer": "http://main.eastgoessouth.online/api/live/livedrama/v13.0.0/",
             "type": "tv"
-            // يمكن تمرير "date": "YYYY-MM-DD" هنا إذا أردت جلب مباريات يوم محدد مستقبلاً
         };
 
         const encryptedBody = encryptAES(JSON.stringify(postData));
 
-        // 2. إرسال الطلب (POST) كـ arraybuffer للتعامل مع الرد المشفر بشكل صحيح
         const response = await axios.post("http://sport.1spbgmu.com/sport/getMatches", encryptedBody, {
             headers: { 
                 "Content-Type": "text/plain", 
@@ -886,38 +881,58 @@ app.get("/mach", async (req, res) => {
             responseType: "arraybuffer"
         });
 
-        // 3. تحويل الرد وفك التشفير
         const encryptedResponse = Buffer.from(response.data).toString("utf-8");
         const decryptedResponse = decryptAES(encryptedResponse);
         const jsonResponse = JSON.parse(decryptedResponse);
 
-        // 4. تحديد مصفوفة المباريات من الـ JSON
         let rawMatches = Array.isArray(jsonResponse) ? jsonResponse : (jsonResponse.matches || jsonResponse.data || []);
 
-        // 5. تبسيط الهيكل مثل /channels لتسهيل التعامل معه في الـ Front-end 
-        const formattedMatches = rawMatches.map(match => ({
-            id: match.id || match.id_match || "",
-            title: match.title || match.name || "",
-            league: match.league || match.championship || "",
-            team1: match.team1 || match.home_team || "",
-            team2: match.team2 || match.away_team || "",
-            team1_logo: match.team1_logo || match.logo1 || "",
-            team2_logo: match.team2_logo || match.logo2 || "",
-            time: match.time || match.match_time || "",
-            date: match.date || "",
-            status: match.status || "",
-            score: match.score || match.result || "",
-            channel: match.channel || match.channels || "",
-            id_live: match.id_live || match.channel_id || "" // هذا المفتاح مهم جداً لتمريره لاحقاً إلى مسار /stream
-        }));
+        // 🎯 الاستخراج المحدث ليتوافق مع الـ JSON الفعلي
+        const formattedMatches = rawMatches.map(match => {
+            // تنظيف الوقت وحالة المباراة
+            let matchTime = "";
+            let matchStatus = "لم تبدأ";
+            let dateVal = match.date || "";
+            
+            if (dateVal.includes("انتهت")) {
+                matchStatus = "انتهت";
+                matchTime = "انتهت";
+            } else {
+                // استخراج الوقت من النص مثل "(Istanbul 22:00)"
+                const timeMatch = dateVal.match(/\d{2}:\d{2}/);
+                if (timeMatch) matchTime = timeMatch[0];
+                else matchTime = dateVal;
+            }
 
-res.json(rawMatches);
+            // التعامل مع النتيجة (Score)
+            let finalScore = "";
+            if (match.firstTeamScore && match.firstTeamScore !== "-") {
+                finalScore = match.firstTeamScore; // أحياناً المصدر يعطي النتيجة كـ "3-1" مباشرة
+            }
+
+            return {
+                title: match.title || "",
+                league: match.topic || "",
+                team1: match.firstTeam || "",
+                team2: match.secondtTeam || "", // الانتباه للخطأ الإملائي من المصدر
+                team1_logo: match.firstTeamImage || "",
+                team2_logo: match.secondtTeamImage || "",
+                time: matchTime,
+                date: dateVal,
+                status: matchStatus,
+                score: finalScore,
+                channel: match.channel || "",
+                id_live: match.channel || "" // نستخدم المفتاح channel كمعرف للبث (id_live)
+            };
+        });
+
+        res.json(formattedMatches);
+
     } catch (error) { 
         console.error('Error fetching matches:', error.message);
         res.status(500).json({ error: true, message: error.message }); 
     }
 });
-
 
 
 
