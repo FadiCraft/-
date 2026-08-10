@@ -844,48 +844,80 @@ app.get("/live_id/:id_live", async (req, res) => {
 
 
 
-
-
-
-
-
-
-// مسار جلب المباريات
-app.get('/mach', async (req, res) => {
+// ==========================================
+// 4. مسار جلب المباريات (مفكوك التشفير ومبسط)
+// ==========================================
+app.get("/mach", async (req, res) => {
     try {
-        // رابط الـ API الخاص بالمباريات
-        const targetUrl = 'http://sport.1spbgmu.com/sport/getMatches';
-        
-        // إرسال الطلب لجلب البيانات
-        const response = await axios.get(targetUrl);
-        
-        // إرجاع النتيجة للمستخدم بتنسيق JSON
-        res.json({
-            success: true,
-            data: response.data
+        console.log(`⚽ جلب بيانات المباريات...`);
+
+        // 1. تجهيز البيانات الأساسية للطلب (نفس المستخدمة في باقي التطبيق)
+        const postData = {
+            "user_id": "_82668_1785761367217_notloggedin.com_dramalive3",
+            "device_id": "e603540e-ed93-47a3-bec6-a15f7f056604",
+            "device_api": "28",
+            "version_name": "187",
+            "language": "ar",
+            "timezone": "Europe/Istanbul",
+            "device_type": "phone",
+            "KEY_ACTIVATED_TYPE": "232425",
+            "store": "direct",
+            "isStoreVersion": false,
+            "isPremium": false,
+            "isCoupon_active": false,
+            "hideAds": false,
+            "appCount": "{\"adsFailed\":73,\"adsLoaded\":56,\"adsShowed\":17,\"runCount\":8}",
+            "mainServer": "http://main.eastgoessouth.online/api/live/livedrama/v13.0.0/",
+            "type": "tv"
+            // يمكن تمرير "date": "YYYY-MM-DD" هنا إذا أردت جلب مباريات يوم محدد مستقبلاً
+        };
+
+        const encryptedBody = encryptAES(JSON.stringify(postData));
+
+        // 2. إرسال الطلب (POST) كـ arraybuffer للتعامل مع الرد المشفر بشكل صحيح
+        const response = await axios.post("http://sport.1spbgmu.com/sport/getMatches", encryptedBody, {
+            headers: { 
+                "Content-Type": "text/plain", 
+                "User-Agent": "Dalvik/2.1.0 (Linux; U; Android 9; SM-S908E Build/TP1A.220624.014)", 
+                "Host": "sport.1spbgmu.com", 
+                "Connection": "Keep-Alive" 
+            },
+            timeout: 30000,
+            responseType: "arraybuffer"
         });
 
-    } catch (error) {
+        // 3. تحويل الرد وفك التشفير
+        const encryptedResponse = Buffer.from(response.data).toString("utf-8");
+        const decryptedResponse = decryptAES(encryptedResponse);
+        const jsonResponse = JSON.parse(decryptedResponse);
+
+        // 4. تحديد مصفوفة المباريات من الـ JSON
+        let rawMatches = Array.isArray(jsonResponse) ? jsonResponse : (jsonResponse.matches || jsonResponse.data || []);
+
+        // 5. تبسيط الهيكل مثل /channels لتسهيل التعامل معه في الـ Front-end 
+        const formattedMatches = rawMatches.map(match => ({
+            id: match.id || match.id_match || "",
+            title: match.title || match.name || "",
+            league: match.league || match.championship || "",
+            team1: match.team1 || match.home_team || "",
+            team2: match.team2 || match.away_team || "",
+            team1_logo: match.team1_logo || match.logo1 || "",
+            team2_logo: match.team2_logo || match.logo2 || "",
+            time: match.time || match.match_time || "",
+            date: match.date || "",
+            status: match.status || "",
+            score: match.score || match.result || "",
+            channel: match.channel || match.channels || "",
+            id_live: match.id_live || match.channel_id || "" // هذا المفتاح مهم جداً لتمريره لاحقاً إلى مسار /stream
+        }));
+
+        res.json(formattedMatches);
+
+    } catch (error) { 
         console.error('Error fetching matches:', error.message);
-        
-        // إرجاع رسالة خطأ في حال فشل جلب البيانات
-        res.status(500).json({
-            success: false,
-            error: 'حدث خطأ أثناء جلب بيانات المباريات'
-        });
+        res.status(500).json({ error: true, message: error.message }); 
     }
 });
-
-
-
-
-
-
-
-
-
-
-
 
 
 
