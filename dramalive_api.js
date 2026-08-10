@@ -641,8 +641,10 @@ app.post("/get-redirect-data", async (req, res) => {
 
 
 
+
+
 // ==========================================
-// مسار جلب واستخراج الرابط النهائي تلقائياً
+// مسار جلب الرد مفكوك التشفير من getLiveByRedirect عبر الرابط مباشرة
 // ==========================================
 app.get("/get-redirect-data", async (req, res) => {
     try {
@@ -652,9 +654,9 @@ app.get("/get-redirect-data", async (req, res) => {
             return res.status(400).json({ error: true, message: "يرجى إرسال id_live في الرابط" });
         }
 
-        console.log(`📺 جلب الرابط الأساسي لقناة: ${id_live}`);
+        console.log(`🔍 جلب الرابط الأساسي لقناة: ${id_live}`);
 
-        // 1. جلب الرابط الأساسي (url) الخاص بالقناة من التطبيق
+        // 1. جلب الرابط الأساسي (url) الخاص بالقناة أولاً لكي نرسله في الخطوة التالية
         const streamsPostData = {
             "user_id": "_82668_1785761367217_notloggedin.com_dramalive3",
             "device_id": "e603540e-ed93-47a3-bec6-a15f7f056604",
@@ -675,39 +677,27 @@ app.get("/get-redirect-data", async (req, res) => {
         
         const decryptedStreamRes = decryptAES(Buffer.from(streamRes.data).toString("utf-8"));
         const streamJson = JSON.parse(decryptedStreamRes);
-        const liveData = streamJson.live || {};
-        const mainUrl = liveData.url || "";
+        const url = streamJson.live?.url;
 
-        if (!mainUrl || mainUrl === "empty") {
-            return res.status(404).json({ error: true, message: "لم يتم العثور على رابط لهذه القناة" });
+        if (!url || url === "empty") {
+            return res.status(404).json({ error: true, message: "لم يتم العثور على رابط أساسي لهذه القناة" });
         }
 
-        console.log(`🔄 تمرير الرابط إلى دالة الحل والتوجيه (resolveRedirectUrl)...`);
+        console.log(`🚀 إرسال الطلب إلى getLiveByRedirect...`);
 
-        // 2. استخدام دالة resolveRedirectUrl الموجودة عندك مسبقاً لتتبع الرابط وفك تشفيره بالكامل
-        const resolvedResult = await resolveRedirectUrl(id_live, mainUrl);
+        // 2. إرسال الطلب إلى getLiveByRedirect باستخدام دالة sendRequest الموجودة عندك
+        const result = await sendRequest(id_live, url, "redirect", "", "getLiveByRedirect");
 
-        if (!resolvedResult || !resolvedResult.url) {
-            return res.status(500).json({ error: true, message: "فشل استخراج الرابط النهائي عبر نظام التوجيه" });
-        }
-
-        // 3. إرجاع النتيجة النهائية النظيفة (رابط الـ m3u8 والـ Headers المطلوبة)
-        res.json({
-            success: true,
-            id_live: id_live,
-            name: liveData.name || "",
-            stream_info: {
-                url: resolvedResult.url,          // الرابط النهائي المباشر للتشغيل
-                mediatype: resolvedResult.mediatype, // نوع البث (hls / dash)
-                headers: resolvedResult.headers,     // الهيدرز الضرورية لكي لا يعطي 404
-                agent: resolvedResult.agent
-            }
-        });
+        // 3. إرجاع الرد مفكوك التشفير (JSON الصافي كما طلبته)
+        res.json(result.decrypted_response);
 
     } catch (error) {
         res.status(500).json({ error: true, message: error.message });
     }
 });
+
+
+
 
 
 
