@@ -911,8 +911,7 @@ app.get("/mach", async (req, res) => {
             id_live: match.id_live || match.channel_id || "" // هذا المفتاح مهم جداً لتمريره لاحقاً إلى مسار /stream
         }));
 
-        res.json(formattedMatches);
-
+res.json(rawMatches);
     } catch (error) { 
         console.error('Error fetching matches:', error.message);
         res.status(500).json({ error: true, message: error.message }); 
