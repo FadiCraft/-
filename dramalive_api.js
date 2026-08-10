@@ -832,6 +832,70 @@ app.get("/live_id/:id_live", async (req, res) => {
 
 
 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+// مسار جلب المباريات
+app.get('/mach', async (req, res) => {
+    try {
+        // رابط الـ API الخاص بالمباريات
+        const targetUrl = 'http://sport.1spbgmu.com/sport/getMatches';
+        
+        // إرسال الطلب لجلب البيانات
+        const response = await axios.get(targetUrl);
+        
+        // إرجاع النتيجة للمستخدم بتنسيق JSON
+        res.json({
+            success: true,
+            data: response.data
+        });
+
+    } catch (error) {
+        console.error('Error fetching matches:', error.message);
+        
+        // إرجاع رسالة خطأ في حال فشل جلب البيانات
+        res.status(500).json({
+            success: false,
+            error: 'حدث خطأ أثناء جلب بيانات المباريات'
+        });
+    }
+});
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 // ==========================================
 // 3. /resolve و /extract
 // ==========================================
