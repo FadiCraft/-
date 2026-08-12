@@ -508,8 +508,10 @@ app.get("/channels", async (req, res) => {
 
 
 // ==========================================
-// مسار /stream (محدث: يجلب السيرفرات، يفك روابط redirect، ويرتبها)
+// مسار /stream (محدث: يفك الـ redirect ويطابق هيكل المشغل)
 // ==========================================
+const DEFAULT_AGENT = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/149.0.0.0 Safari/537.36";
+
 app.get("/stream", async (req, res) => {
     try {
         const id_live = req.query.id_live;
@@ -517,9 +519,9 @@ app.get("/stream", async (req, res) => {
             return res.status(400).json({ error: true, message: "يرجى إرسال id_live" });
         }
 
-        console.log(`📺 معالجة سيرفرات القناة وفك الـ Redirect: ${id_live}`);
+        console.log(`📺 جلب ومطابقة سيرفرات القناة: ${id_live}`);
 
-        // 1. جلب البيانات الأساسية للقناة
+        // 1. جلب البيانات الأساسية
         const postData = {
             "user_id": "_82668_1785761367217_notloggedin.com_dramalive3",
             "device_id": "e603540e-ed93-47a3-bec6-a15f7f056604",
@@ -548,15 +550,13 @@ app.get("/stream", async (req, res) => {
         const rawJson = JSON.parse(decryptedResponse);
         const liveData = rawJson.live || {};
 
-        // 2. تجميع كل الروابط (الأساسي + الاحتياطية) في مصفوفة واحدة
+        // 2. تجميع كل الروابط في مصفوفة مبدئية
         let allStreams = [];
 
-        // الرابط الأساسي
         if (liveData.url && liveData.url !== "empty") {
             allStreams.push({ url: liveData.url, agent: liveData.agent || "" });
         }
 
-        // الروابط الاحتياطية
         if (liveData.backup) {
             const backupParts = liveData.backup.split("-;-");
             for (const part of backupParts) {
@@ -573,50 +573,88 @@ app.get("/stream", async (req, res) => {
             }
         }
 
-        // 3. فحص الروابط وإرسال الطلبات لروابط الـ redirect
-        let resolvedStreams = [];
+        // 3. فك الـ Redirect وتشكيل الهيكل النهائي المتوافق مع المشغل
+        let parsedStreams = [];
+        let serverIndex = 1;
 
         for (const stream of allStreams) {
+            let finalUrl = "";
+            let finalAgent = DEFAULT_AGENT;
+            let finalHeaders = { "User-Agent": DEFAULT_AGENT };
+            let finalMediatype = null;
+            let finalDrm = null;
+
+            let dataToParse = stream.url;
+
+            // إذا كان السيرفر من نوع redirect، نفك التشفير أولاً
             if (stream.agent === "redirect") {
                 try {
-                    // إذا كان الرابط من نوع LS.V2، نقوم بتحويله باستخدام الدالة الموجودة لديك
                     let urlToSend = stream.url;
                     if (urlToSend.includes(".LS.V2") && urlToSend.endsWith("/s")) {
                         urlToSend = convertFakeUrlToRealUrl(urlToSend, id_live);
                     }
-
-                    // إرسال الطلب لفك التشفير
+                    
                     const redirectResult = await sendRequest(id_live, urlToSend, "redirect", "", "getLiveByRedirect");
                     
-                    resolvedStreams.push({
-                        original_url: stream.url,
-                        agent: stream.agent,
-                        redirect_data: redirectResult.decrypted_response // هذا هو الرد المفكوك الذي طلبته
-                    });
+                    // استخراج الرابط المتداخل من الرد
+                    if (redirectResult.decrypted_response && redirectResult.decrypted_response.data) {
+                        dataToParse = redirectResult.decrypted_response.data.url;
+                    }
                 } catch (err) {
-                    resolvedStreams.push({
-                        original_url: stream.url,
-                        agent: stream.agent,
-                        error: "فشل في فك الـ redirect",
-                        details: err.message
-                    });
+                    console.error(`خطأ في فك redirect للسيرفر ${stream.url}:`, err.message);
                 }
-            } else {
-                // إذا لم يكن redirect (مثل double_redirect أو مباشر)، نضعه كما هو
-                resolvedStreams.push({
-                    original_url: stream.url,
-                    agent: stream.agent,
-                    redirect_data: null
-                });
             }
+
+            // محاولة تحليل نص الـ JSON لاستخراج الروابط والـ Headers
+            try {
+                if (typeof dataToParse === "string" && dataToParse.trim().startsWith("{")) {
+                    const parsedObj = JSON.parse(dataToParse);
+                    finalUrl = parsedObj.url || "";
+                    finalAgent = parsedObj.agent || stream.agent || finalAgent;
+                    
+                    if (parsedObj.headers) {
+                        finalHeaders = parsedObj.headers;
+                        // ضمان وجود User-Agent في الترويسات
+                        if (!finalHeaders["User-Agent"] && !finalHeaders["user-agent"]) {
+                            finalHeaders["User-Agent"] = finalAgent;
+                        }
+                    }
+                    
+                    finalMediatype = parsedObj.mediatype || null;
+                    finalDrm = parsedObj.drm || null;
+                } else {
+                    finalUrl = dataToParse || "";
+                    finalAgent = stream.agent || finalAgent;
+                }
+            } catch (e) {
+                // إذا لم يكن JSON، نأخذ النص كما هو
+                finalUrl = dataToParse || "";
+                finalAgent = stream.agent || finalAgent;
+            }
+
+            // تحديد نوع الميديا تلقائياً إذا كان مفقوداً
+            if (!finalMediatype && finalUrl) {
+                if (finalUrl.includes(".m3u8")) finalMediatype = "hls";
+                else if (finalUrl.includes(".mpd")) finalMediatype = "dash";
+            }
+
+            // إضافته للهيكل النهائي
+            parsedStreams.push({
+                server_name: `سيرفر ${serverIndex++}`,
+                url: finalUrl,
+                agent: finalAgent,
+                drm: finalDrm,
+                headers: finalHeaders,
+                mediatype: finalMediatype
+            });
         }
 
-        // 4. عرض النتيجة النهائية مرتبة
+        // 4. إرسال الرد النهائي
         res.json({
             id_live: liveData.id_live || id_live,
             name: liveData.name || "",
             img_url: liveData.img_url || "",
-            streams: resolvedStreams
+            streams: parsedStreams
         });
 
     } catch (error) { 
@@ -624,10 +662,6 @@ app.get("/stream", async (req, res) => {
         res.status(500).json({ error: true, message: error.message }); 
     }
 });
-
-
-
-
 
 
 
