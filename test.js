@@ -510,8 +510,6 @@ app.get("/channels", async (req, res) => {
 // ==========================================
 // مسار /stream (محدث: يفك الـ redirect ويطابق هيكل المشغل)
 // ==========================================
-const DEFAULT_AGENT = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/149.0.0.0 Safari/537.36";
-
 app.get("/stream", async (req, res) => {
     try {
         const id_live = req.query.id_live;
@@ -614,7 +612,6 @@ app.get("/stream", async (req, res) => {
                     
                     if (parsedObj.headers) {
                         finalHeaders = parsedObj.headers;
-                        // ضمان وجود User-Agent في الترويسات
                         if (!finalHeaders["User-Agent"] && !finalHeaders["user-agent"]) {
                             finalHeaders["User-Agent"] = finalAgent;
                         }
@@ -627,18 +624,15 @@ app.get("/stream", async (req, res) => {
                     finalAgent = stream.agent || finalAgent;
                 }
             } catch (e) {
-                // إذا لم يكن JSON، نأخذ النص كما هو
                 finalUrl = dataToParse || "";
                 finalAgent = stream.agent || finalAgent;
             }
 
-            // تحديد نوع الميديا تلقائياً إذا كان مفقوداً
             if (!finalMediatype && finalUrl) {
                 if (finalUrl.includes(".m3u8")) finalMediatype = "hls";
                 else if (finalUrl.includes(".mpd")) finalMediatype = "dash";
             }
 
-            // إضافته للهيكل النهائي
             parsedStreams.push({
                 server_name: `سيرفر ${serverIndex++}`,
                 url: finalUrl,
@@ -662,11 +656,6 @@ app.get("/stream", async (req, res) => {
         res.status(500).json({ error: true, message: error.message }); 
     }
 });
-
-
-
-
-
 
 
 
