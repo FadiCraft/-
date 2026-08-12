@@ -667,7 +667,8 @@ app.post("/get-redirect-data", async (req, res) => {
 
 
 // ==========================================
-// مسار جلب الرد مفكوك التشفير من getLiveByRedirect عبر الرابط مباشرة
+// مسار GET: استخراج رد getLiveByRedirect مفكوك التشفير عبر id_live
+// (نسخة محسنة مع Double Redirect)
 // ==========================================
 app.get("/get-redirect-data", async (req, res) => {
     try {
@@ -679,7 +680,7 @@ app.get("/get-redirect-data", async (req, res) => {
 
         console.log(`🔍 جلب الرابط الأساسي لقناة: ${id_live}`);
 
-        // 1. جلب الرابط الأساسي (url) الخاص بالقناة أولاً لكي نرسله في الخطوة التالية
+        // 1. جلب الرابط الأساسي (url) الخاص بالقناة
         const streamsPostData = {
             "user_id": "_82668_1785761367217_notloggedin.com_dramalive3",
             "device_id": "e603540e-ed93-47a3-bec6-a15f7f056604",
@@ -706,19 +707,62 @@ app.get("/get-redirect-data", async (req, res) => {
             return res.status(404).json({ error: true, message: "لم يتم العثور على رابط أساسي لهذه القناة" });
         }
 
-        console.log(`🚀 إرسال الطلب إلى getLiveByRedirect...`);
+        console.log(`🔄 [GET] بدء معالجة Redirect للقناة: ${id_live}`);
 
-        // 2. إرسال الطلب إلى getLiveByRedirect باستخدام دالة sendRequest الموجودة عندك
-        const result = await sendRequest(id_live, url, "redirect", "", "getLiveByRedirect");
+        // 2. إرسال الطلب الأول إلى getLiveByRedirect
+        let result = await sendRequest(id_live, url, "redirect", "", "getLiveByRedirect");
+        let decryptedData = result.decrypted_response;
+        
+        // 3. 🎯 التحقق الذكي: هل الرد يحتوي على رابط مباشر؟
+        let dataUrl = decryptedData?.data?.url || "";
+        let extractedUrl = extractUrlFromDataUrl(dataUrl);
+        
+        console.log(`📌 الرد الأول - الرابط المستخرج: ${extractedUrl?.substring(0, 80)}...`);
+        
+        // إذا ما كان رابط مباشر وعندنا encrypted_response ➔ نجرب Double Redirect
+        if (!isDirectStreamUrl(extractedUrl) && result.encrypted_response) {
+            console.log(`⚠️ الرابط مش مباشر، جاري تجربة getLiveByDoubleRedirect...`);
+            
+            const rawDataForDouble = result.encrypted_response.trim();
+            const doubleAgent = decryptedData?.data?.agent || "double_redirect";
+            const urlForDouble = dataUrl || url;
+            
+            result = await sendRequest(id_live, urlForDouble, doubleAgent, rawDataForDouble, "getLiveByDoubleRedirect");
+            decryptedData = result.decrypted_response;
+            
+            dataUrl = decryptedData?.data?.url || "";
+            extractedUrl = extractUrlFromDataUrl(dataUrl);
+            
+            console.log(`📌 الرد الثاني - الرابط المستخرج: ${extractedUrl?.substring(0, 80)}...`);
+            
+            // محاولة أخيرة
+            if (!isDirectStreamUrl(extractedUrl) && result.encrypted_response) {
+                console.log(`⚠️ لسه مش مباشر، محاولة أخيرة...`);
+                
+                const finalRawData = result.encrypted_response.trim();
+                const finalAgent = decryptedData?.data?.agent || "double_redirect";
+                const finalUrl = dataUrl || urlForDouble;
+                
+                result = await sendRequest(id_live, finalUrl, finalAgent, finalRawData, "getLiveByDoubleRedirect");
+                decryptedData = result.decrypted_response;
+            }
+        }
 
-        // 3. إرجاع الرد مفكوك التشفير (JSON الصافي كما طلبته)
-        res.json(result.decrypted_response);
+        const finalExtracted = extractUrlFromDataUrl(decryptedData?.data?.url || "");
+        
+        res.json({
+            ...decryptedData,
+            _meta: {
+                id_live: id_live,
+                direct_url: finalExtracted,
+                is_direct: isDirectStreamUrl(finalExtracted)
+            }
+        });
 
     } catch (error) {
         res.status(500).json({ error: true, message: error.message });
     }
 });
-
 
 
 
