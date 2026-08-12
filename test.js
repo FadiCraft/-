@@ -508,7 +508,7 @@ app.get("/channels", async (req, res) => {
 
 
 // ==========================================
-// مسار /stream (محدث: يفك الـ redirect ويطابق هيكل المشغل)
+// مسار /stream (مبسط: يطلب، يفك التشفير، ويعرض الرد الأصلي فقط)
 // ==========================================
 app.get("/stream", async (req, res) => {
     try {
@@ -517,9 +517,8 @@ app.get("/stream", async (req, res) => {
             return res.status(400).json({ error: true, message: "يرجى إرسال id_live" });
         }
 
-        console.log(`📺 جلب ومطابقة سيرفرات القناة: ${id_live}`);
+        console.log(`📺 جلب الرد الأصلي للقناة: ${id_live}`);
 
-        // 1. جلب البيانات الأساسية
         const postData = {
             "user_id": "_82668_1785761367217_notloggedin.com_dramalive3",
             "device_id": "e603540e-ed93-47a3-bec6-a15f7f056604",
@@ -532,7 +531,10 @@ app.get("/stream", async (req, res) => {
             "type": "tv", "id_live": id_live, "id": id_live, "live_id": id_live, "channel_id": id_live
         };
 
+        // 1. تشفير الطلب
         const encryptedBody = encryptAES(JSON.stringify(postData));
+        
+        // 2. إرسال الطلب للسيرفر الأساسي
         const response = await axios.post("http://live.1spbgmu.com/api/live/livedrama/v13.0.0/getLiveAllStreamsById", encryptedBody, {
             headers: { 
                 "Content-Type": "text/plain", 
@@ -541,123 +543,28 @@ app.get("/stream", async (req, res) => {
                 "Connection": "Keep-Alive" 
             },
             timeout: 15000, 
-            responseType: "arraybuffer"
+            responseType: "arraybuffer" // مهم لاستقبال البيانات كـ Buffer قبل فك التشفير
         });
 
-        const decryptedResponse = decryptAES(Buffer.from(response.data).toString("utf-8"));
-        const rawJson = JSON.parse(decryptedResponse);
-        const liveData = rawJson.live || {};
+        // 3. فك تشفير الرد
+        const encryptedResponse = Buffer.from(response.data).toString("utf-8");
+        const decryptedResponse = decryptAES(encryptedResponse);
+        const jsonResponse = JSON.parse(decryptedResponse);
 
-        // 2. تجميع كل الروابط في مصفوفة مبدئية
-        let allStreams = [];
-
-        if (liveData.url && liveData.url !== "empty") {
-            allStreams.push({ url: liveData.url, agent: liveData.agent || "" });
-        }
-
-        if (liveData.backup) {
-            const backupParts = liveData.backup.split("-;-");
-            for (const part of backupParts) {
-                const trimmedPart = part.trim();
-                if (!trimmedPart) continue;
-                
-                const subParts = trimmedPart.split("--");
-                const linkData = subParts[0] ? subParts[0].trim() : "";
-                const agentData = subParts[1] ? subParts[1].trim() : "";
-                
-                if (linkData && linkData !== "empty") {
-                    allStreams.push({ url: linkData, agent: agentData });
-                }
-            }
-        }
-
-        // 3. فك الـ Redirect وتشكيل الهيكل النهائي المتوافق مع المشغل
-        let parsedStreams = [];
-        let serverIndex = 1;
-
-        for (const stream of allStreams) {
-            let finalUrl = "";
-            let finalAgent = DEFAULT_AGENT;
-            let finalHeaders = { "User-Agent": DEFAULT_AGENT };
-            let finalMediatype = null;
-            let finalDrm = null;
-
-            let dataToParse = stream.url;
-
-            // إذا كان السيرفر من نوع redirect، نفك التشفير أولاً
-            if (stream.agent === "redirect") {
-                try {
-                    let urlToSend = stream.url;
-                    if (urlToSend.includes(".LS.V2") && urlToSend.endsWith("/s")) {
-                        urlToSend = convertFakeUrlToRealUrl(urlToSend, id_live);
-                    }
-                    
-                    const redirectResult = await sendRequest(id_live, urlToSend, "redirect", "", "getLiveByRedirect");
-                    
-                    // استخراج الرابط المتداخل من الرد
-                    if (redirectResult.decrypted_response && redirectResult.decrypted_response.data) {
-                        dataToParse = redirectResult.decrypted_response.data.url;
-                    }
-                } catch (err) {
-                    console.error(`خطأ في فك redirect للسيرفر ${stream.url}:`, err.message);
-                }
-            }
-
-            // محاولة تحليل نص الـ JSON لاستخراج الروابط والـ Headers
-            try {
-                if (typeof dataToParse === "string" && dataToParse.trim().startsWith("{")) {
-                    const parsedObj = JSON.parse(dataToParse);
-                    finalUrl = parsedObj.url || "";
-                    finalAgent = parsedObj.agent || stream.agent || finalAgent;
-                    
-                    if (parsedObj.headers) {
-                        finalHeaders = parsedObj.headers;
-                        if (!finalHeaders["User-Agent"] && !finalHeaders["user-agent"]) {
-                            finalHeaders["User-Agent"] = finalAgent;
-                        }
-                    }
-                    
-                    finalMediatype = parsedObj.mediatype || null;
-                    finalDrm = parsedObj.drm || null;
-                } else {
-                    finalUrl = dataToParse || "";
-                    finalAgent = stream.agent || finalAgent;
-                }
-            } catch (e) {
-                finalUrl = dataToParse || "";
-                finalAgent = stream.agent || finalAgent;
-            }
-
-            if (!finalMediatype && finalUrl) {
-                if (finalUrl.includes(".m3u8")) finalMediatype = "hls";
-                else if (finalUrl.includes(".mpd")) finalMediatype = "dash";
-            }
-
-            parsedStreams.push({
-                server_name: `سيرفر ${serverIndex++}`,
-                url: finalUrl,
-                agent: finalAgent,
-                drm: finalDrm,
-                headers: finalHeaders,
-                mediatype: finalMediatype
-            });
-        }
-
-        // 4. إرسال الرد النهائي
-        res.json({
-            id_live: liveData.id_live || id_live,
-            name: liveData.name || "",
-            img_url: liveData.img_url || "",
-            streams: parsedStreams
-        });
+        // 4. عرض الـ JSON الأصلي كما هو
+        res.json(jsonResponse);
 
     } catch (error) { 
-        console.error(`❌ خطأ في مسار /stream: ${error.message}`);
-        res.status(500).json({ error: true, message: error.message }); 
+        // رسالة الخطأ المحدثة لمعرفة مصدر الـ Not Found
+        const status = error.response ? error.response.status : null;
+        console.error(`❌ خطأ في جلب السيرفرات: ${status || error.message}`);
+        
+        res.status(500).json({ 
+            error: true, 
+            message: status ? `السيرفر الأساسي رد بخطأ: ${status}` : error.message 
+        }); 
     }
 });
-
-
 
 
 
