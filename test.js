@@ -508,7 +508,9 @@ app.get("/channels", async (req, res) => {
 
 
 // ==========================================
-// مسار /stream (استخراج كافة السيرفرات ومطابقة الهيكل الموحد للمشغل)
+// مسار /stream 
+// (المسار الرئيسي: يعرض كل السيرفرات بهيكل المشغل)
+// (طلب سيرفر محدد مثل &s1: يعرض الرد الخام المفكوك من السيرفر كما هو)
 // ==========================================
 const DEFAULT_USER_AGENT = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/149.0.0.0 Safari/537.36";
 
@@ -519,7 +521,7 @@ app.get("/stream", async (req, res) => {
             return res.status(400).json({ error: true, message: "يرجى إرسال id_live" });
         }
 
-        // معرفة ما إذا كان هناك طلب لسيرفر معين (مثل &s1 أو &s2)
+        // التحقق مما إذا كان هناك طلب لسيرفر محدد (مثل &s1 أو &s2)
         let requestedServerIndex = -1;
         for (const key in req.query) {
             if (key.match(/^s\d+$/)) {
@@ -528,9 +530,9 @@ app.get("/stream", async (req, res) => {
             }
         }
 
-        console.log(`📺 جلب ومعالجة سيرفرات القناة: ${id_live}`);
+        console.log(`📺 جلب القناة: ${id_live} ${requestedServerIndex !== -1 ? `[طلب الرد الخام لسيرفر s${requestedServerIndex + 1}]` : '[هيكل المشغل الكامل]'}`);
 
-        // 1. جلب البيانات الأساسية من سيرفر القنوات
+        // 1. جلب البيانات الأساسية من السيرفر الأول
         const postData = {
             "user_id": "_82668_1785761367217_notloggedin.com_dramalive3",
             "device_id": "e603540e-ed93-47a3-bec6-a15f7f056604",
@@ -582,14 +584,68 @@ app.get("/stream", async (req, res) => {
             }
         }
 
-        // 3. التكرار على السيرفرات واستخراج بيانات كل سيرفر وفق الهيكل المطلوب
+        // =======================================================
+        // الحالة الأولى: المستخدم طلب سيرفر محدد (عرض الرد الخام)
+        // =======================================================
+        if (requestedServerIndex !== -1) {
+            if (requestedServerIndex >= rawStreams.length) {
+                return res.status(404).json({
+                    error: true,
+                    message: `السيرفر s${requestedServerIndex + 1} غير متوفر. المتاح: ${rawStreams.length} سيرفرات`
+                });
+            }
+
+            const targetStream = rawStreams[requestedServerIndex];
+
+            if (targetStream.agent === "redirect") {
+                const redirectPayload = {
+                    "user_id": "_82668_1785761367217_notloggedin.com_dramalive3",
+                    "device_id": "e603540e-ed93-47a3-bec6-a15f7f056604",
+                    "device_api": "28", "version_name": "187", "language": "ar",
+                    "timezone": "Europe/Istanbul", "device_type": "phone",
+                    "KEY_ACTIVATED_TYPE": "232425", "store": "direct",
+                    "isStoreVersion": false, "isPremium": false, "isCoupon_active": false, "hideAds": false,
+                    "appCount": "{\"adsFailed\":468,\"adsLoaded\":240,\"adsShowed\":116,\"runCount\":54}",
+                    "mainServer": "http://main.eastgoessouth.online/api/live/livedrama/v13.0.0/",
+                    "id": id_live,
+                    "url": targetStream.url, 
+                    "agent": "redirect"
+                };
+
+                const encryptedRedirectBody = encryptAES(JSON.stringify(redirectPayload));
+                const redirectRes = await axios.post("http://redirect.1spbgmu.com/redirect/getLiveByRedirect", encryptedRedirectBody, {
+                    headers: { 
+                        "Content-Type": "text/plain", 
+                        "User-Agent": "Dalvik/2.1.0 (Linux; U; Android 9; SM-S908E Build/TP1A.220624.014)", 
+                        "Host": "redirect.1spbgmu.com", 
+                        "Connection": "Keep-Alive" 
+                    },
+                    timeout: 15000, 
+                    responseType: "arraybuffer"
+                });
+
+                // فك التشفير وعرضه مباشرة كما هو من السيرفر
+                const decryptedStr = decryptAES(Buffer.from(redirectRes.data).toString("utf-8"));
+                const parsedRedirect = JSON.parse(decryptedStr);
+                
+                return res.json(parsedRedirect);
+            } else {
+                return res.json({
+                    message: `السيرفر s${requestedServerIndex + 1} ليس redirect`,
+                    raw_data: targetStream
+                });
+            }
+        }
+
+        // =======================================================
+        // الحالة الثانية: المسار الرئيسي بدون تحديد (تطبيق هيكل المشغل)
+        // =======================================================
         let finalStreamsList = [];
         let serverCounter = 1;
 
         for (const item of rawStreams) {
             let streamDataObj = null;
 
-            // أ) إذا كان السيرفر يحتاج فك redirect
             if (item.agent === "redirect") {
                 try {
                     const redirectPayload = {
@@ -623,7 +679,6 @@ app.get("/stream", async (req, res) => {
 
                     if (parsedRedirect.data && parsedRedirect.data.url) {
                         try {
-                            // تحليل الـ JSON المتداخل داخل حقل url
                             streamDataObj = JSON.parse(parsedRedirect.data.url);
                         } catch (e) {
                             streamDataObj = { url: parsedRedirect.data.url };
@@ -633,7 +688,6 @@ app.get("/stream", async (req, res) => {
                     console.error(`❌ خطأ أثناء جلب redirect للسيرفر ${serverCounter}:`, err.message);
                 }
             } else {
-                // ب) إذا لم يكن redirect، نتحقق مما إذا كان النص حقل JSON مباشر
                 try {
                     streamDataObj = JSON.parse(item.url);
                 } catch (e) {
@@ -641,18 +695,15 @@ app.get("/stream", async (req, res) => {
                 }
             }
 
-            // ج) تنظيف وتأطير البيانات داخل الهيكل الموحد
             if (streamDataObj) {
                 const finalUrl = streamDataObj.url || "";
                 const finalAgent = streamDataObj.agent || item.agent || DEFAULT_USER_AGENT;
                 
-                // تجهيز الترويسات (Headers)
                 let finalHeaders = streamDataObj.headers || {};
                 if (!finalHeaders["User-Agent"] && !finalHeaders["user-agent"]) {
                     finalHeaders["User-Agent"] = finalAgent;
                 }
 
-                // الكشف التلقائي عن نوع الميديا إذا لم يكن محدداً
                 let finalMediaType = streamDataObj.mediatype || null;
                 if (!finalMediaType && finalUrl) {
                     if (finalUrl.includes(".m3u8")) finalMediaType = "hls";
@@ -672,25 +723,11 @@ app.get("/stream", async (req, res) => {
             }
         }
 
-        // 4. تصفية النتائج إذا طلب المستخدم سيرفر محدد (مثل &s1)
-        let resultStreams = finalStreamsList;
-        if (requestedServerIndex !== -1) {
-            if (requestedServerIndex < finalStreamsList.length) {
-                resultStreams = [finalStreamsList[requestedServerIndex]];
-            } else {
-                return res.status(404).json({
-                    error: true,
-                    message: `السيرفر s${requestedServerIndex + 1} غير متوفر. عدد السيرفرات المتاحة هو ${finalStreamsList.length}`
-                });
-            }
-        }
-
-        // 5. إرجاع النتيجة بالهيكل المطلوب
         res.json({
             "id_live": liveData.id_live || id_live,
             "name": liveData.name || "",
             "img_url": liveData.img_url || "",
-            "streams": resultStreams
+            "streams": finalStreamsList
         });
 
     } catch (error) { 
@@ -703,6 +740,11 @@ app.get("/stream", async (req, res) => {
         }); 
     }
 });
+
+
+
+
+
 
 
 // ==========================================
