@@ -818,10 +818,8 @@ app.get("/get-redirect-data", async (req, res) => {
 
 
 
-
-
 // ==========================================
-// مسار مشترك: دمج فحص Redirect (بما فيه الاستخراج مرة أو مرتين) وإذا فشل (url="1") ينتقل للـ Stream
+// مسار مشترك شامل: جلب بيانات الـ Redirect (مع دعم الاستخراج مرة أو مرتين والتوكن) وإذا فشل (url="1") ينتقل للـ Stream والبدائل
 // ==========================================
 app.get("/live_id/:id_live", async (req, res) => {
     try {
@@ -831,9 +829,9 @@ app.get("/live_id/:id_live", async (req, res) => {
             return res.status(400).json({ error: true, message: "يرجى إرسال id_live في المسار" });
         }
 
-        console.log(`🚀 بدء معالجة المسار المشترك لقناة: ${id_live}`);
+        console.log(`🚀 بدء معالجة المسار الشامل لقناة: ${id_live}`);
 
-        // 1. جلب بيانات البث الأساسية من السيرفر
+        // 1. جلب بيانات البث الأساسية لمعرفة الرابط والسيرفرات البديلة
         const streamsPostData = {
             "user_id": "_82668_1785761367217_notloggedin.com_dramalive3",
             "device_id": "e603540e-ed93-47a3-bec6-a15f7f056604",
@@ -872,10 +870,10 @@ app.get("/live_id/:id_live", async (req, res) => {
             urlVal = redirectData.data.url.trim();
         }
 
-        // 3. التحقق مما إذا كان الرد يساوي "1" (والذي يعني الفشل والانتقال للسيرفرات العادية)
+        // 3. التحقق: هل الرد لا يساوي "1"؟ (أي أن التوجيه نجح وبدأت رحلة الاستخراج)
         if (urlVal !== "1" && urlVal !== "" && urlVal !== "empty") {
             
-            // 🎯 الفحص الذكي: هل الرابط مباشر أم يحتاج استخراج للمرة الثانية (Double Redirect / Token)؟
+            // 🎯 الفحص الذكي للرابط (هل هو مباشر أم يحتاج استخراج ثانٍ / Double Redirect)
             let isDirectStream = false;
             let actualUrlObj = {};
             let actualUrl = urlVal;
@@ -894,12 +892,11 @@ app.get("/live_id/:id_live", async (req, res) => {
                 isDirectStream = true;
             }
 
-            // إذا لم يكن مباشراً (يحتاج استخراج مرة ثانية / Double Redirect)
+            // إذا لم يكن مباشراً (يحتاج استخراج للمرة الثانية - Double Redirect)
             if (!isDirectStream) {
-                console.log(`🔄 [Double Redirect] القناة تحتاج استخراج ثاني (مرة أخرى)، جاري تجهيز البيانات...`);
+                console.log(`🔄 [Double Redirect الشامل] القناة تحتاج استخراج ثاني، جاري تجهيز البيانات والتوكن...`);
                 let rawData = "";
 
-                // إذا كان الرابط يعتمد على توكن خارجي (مثل Easybroadcast) نقوم بجلبه وسيطاً
                 if (actualUrl.includes("token.easybroadcast.io")) {
                     try {
                         const tokenRes = await axios.get(actualUrl, { headers: actualHeaders });
@@ -917,17 +914,17 @@ app.get("/live_id/:id_live", async (req, res) => {
                     rawData = redirectResult.encrypted_response.trim();
                 }
 
-                // إرسال الطلب الثاني والحاسم لـ getLiveByDoubleRedirect وإرجاع النتيجة نهائياً
+                // تنفيذ الطلب الثاني والحاسم لـ getLiveByDoubleRedirect وإرجاع النتيجة النهائية
                 const doubleResult = await sendRequest(id_live, urlVal, "double_redirect", rawData, "getLiveByDoubleRedirect");
                 return res.json(doubleResult.decrypted_response);
             }
 
-            // ✅ الرد مباشر ولا يحتاج استخراج إضافي، نرجعه للعميل مباشرة
+            // ✅ الرابط مباشر ولا يحتاج استخراج إضافي، نرجع نتيجة التوجيه مباشرة
             return res.json(redirectData);
 
         } else {
-            // ⚠️ الرد كان "1"، سننتقل لتنفيذ عملية /stream الأساسية والسيرفرات البديلة
-            console.log(`⚠️ الرد التوجيهي كان ("1")، سيتم تشغيل وظيفة الـ stream والبدائل لقناة: ${id_live}`);
+            // ⚠️ الرد كان "1"، يعني أن قناة الـ Redirect فشلت، سننتقل تلقائياً لتنفيذ عملية الـ Stream والبديلة
+            console.log(`⚠️ الرد التوجيهي كان ("1")، جاري تشغيل وظيفة الـ stream والبدائل لقناة: ${id_live}`);
             
             let parsedStreams = [];
             const mainUrl = liveData.url || "";
@@ -968,8 +965,6 @@ app.get("/live_id/:id_live", async (req, res) => {
         res.status(500).json({ error: true, message: error.message });
     }
 });
-
-
 
 
 
