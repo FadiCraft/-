@@ -820,9 +820,8 @@ app.get("/get-redirect-data", async (req, res) => {
 
 
 
-
 // ==========================================
-// مسار مشترك: جلب بيانات الـ Redirect وإذا فشلت (url="1") ينتقل لجلب الـ Stream
+// مسار مشترك: دمج فحص Redirect (بما فيه الاستخراج مرة أو مرتين) وإذا فشل (url="1") ينتقل للـ Stream
 // ==========================================
 app.get("/live_id/:id_live", async (req, res) => {
     try {
@@ -834,7 +833,7 @@ app.get("/live_id/:id_live", async (req, res) => {
 
         console.log(`🚀 بدء معالجة المسار المشترك لقناة: ${id_live}`);
 
-        // 1. جلب بيانات البث الأساسية (نفس الطلب في /stream لمعرفة الرابط الأساسي والسيرفرات البديلة)
+        // 1. جلب بيانات البث الأساسية من السيرفر
         const streamsPostData = {
             "user_id": "_82668_1785761367217_notloggedin.com_dramalive3",
             "device_id": "e603540e-ed93-47a3-bec6-a15f7f056604",
@@ -864,22 +863,71 @@ app.get("/live_id/:id_live", async (req, res) => {
             return res.status(404).json({ error: true, message: "لم يتم العثور على رابط أساسي لهذه القناة" });
         }
 
-        // 2. إرسال الطلب للحصول على بيانات getLiveByRedirect أولاً
-        const redirectResult = await sendRequest(id_live, url, "redirect", "", "getLiveByRedirect");
-        const redirectData = redirectResult.decrypted_response;
+        // 2. المحاولة الأولى: إرسال الطلب إلى getLiveByRedirect
+        let redirectResult = await sendRequest(id_live, url, "redirect", "", "getLiveByRedirect");
+        let redirectData = redirectResult.decrypted_response;
 
         let urlVal = "";
         if (redirectData && redirectData.data && redirectData.data.url) {
             urlVal = redirectData.data.url.trim();
         }
 
-        // 3. التحقق من الرد: هل هو التفصيلي أم القيمة "1"؟
+        // 3. التحقق مما إذا كان الرد يساوي "1" (والذي يعني الفشل والانتقال للسيرفرات العادية)
         if (urlVal !== "1" && urlVal !== "" && urlVal !== "empty") {
-            // ✅ الرد يحتوي على الداتا الكاملة، نرجعها مباشرة للعميل
+            
+            // 🎯 الفحص الذكي: هل الرابط مباشر أم يحتاج استخراج للمرة الثانية (Double Redirect / Token)؟
+            let isDirectStream = false;
+            let actualUrlObj = {};
+            let actualUrl = urlVal;
+            let actualHeaders = {};
+
+            try {
+                actualUrlObj = JSON.parse(urlVal);
+                actualUrl = actualUrlObj.url || urlVal;
+                actualHeaders = actualUrlObj.headers || {};
+            } catch(e) {}
+
+            const isGateway = actualUrl.includes("token.") || actualUrl.includes("?url=") || actualUrl.includes(".LS.V2");
+            const hasStreamExt = actualUrl.includes(".m3u8") || actualUrl.includes(".mpd");
+
+            if (hasStreamExt && !isGateway) {
+                isDirectStream = true;
+            }
+
+            // إذا لم يكن مباشراً (يحتاج استخراج مرة ثانية / Double Redirect)
+            if (!isDirectStream) {
+                console.log(`🔄 [Double Redirect] القناة تحتاج استخراج ثاني (مرة أخرى)، جاري تجهيز البيانات...`);
+                let rawData = "";
+
+                // إذا كان الرابط يعتمد على توكن خارجي (مثل Easybroadcast) نقوم بجلبه وسيطاً
+                if (actualUrl.includes("token.easybroadcast.io")) {
+                    try {
+                        const tokenRes = await axios.get(actualUrl, { headers: actualHeaders });
+                        if (tokenRes.data && typeof tokenRes.data === 'object') {
+                            rawData = Object.keys(tokenRes.data)
+                                .map(key => `${encodeURIComponent(key)}=${encodeURIComponent(tokenRes.data[key])}`)
+                                .join('&');
+                        } else if (typeof tokenRes.data === 'string') {
+                            rawData = tokenRes.data;
+                        }
+                    } catch (err) {
+                        console.log(`⚠️ فشل جلب التوكن الوسيط: ${err.message}`);
+                    }
+                } else if (redirectResult.encrypted_response) {
+                    rawData = redirectResult.encrypted_response.trim();
+                }
+
+                // إرسال الطلب الثاني والحاسم لـ getLiveByDoubleRedirect وإرجاع النتيجة نهائياً
+                const doubleResult = await sendRequest(id_live, urlVal, "double_redirect", rawData, "getLiveByDoubleRedirect");
+                return res.json(doubleResult.decrypted_response);
+            }
+
+            // ✅ الرد مباشر ولا يحتاج استخراج إضافي، نرجعه للعميل مباشرة
             return res.json(redirectData);
+
         } else {
-            // ⚠️ الرد كان "1"، سننتقل لتنفيذ عملية /stream
-            console.log(`⚠️ الرد التوجيهي كان ("1")، سيتم تشغيل وظيفة الـ stream الأساسية لقناة: ${id_live}`);
+            // ⚠️ الرد كان "1"، سننتقل لتنفيذ عملية /stream الأساسية والسيرفرات البديلة
+            console.log(`⚠️ الرد التوجيهي كان ("1")، سيتم تشغيل وظيفة الـ stream والبدائل لقناة: ${id_live}`);
             
             let parsedStreams = [];
             const mainUrl = liveData.url || "";
@@ -907,7 +955,7 @@ app.get("/live_id/:id_live", async (req, res) => {
                 }
             }
 
-            // إرجاع مخرجات الـ Stream المجهزة بالكامل بدون الدخول في حلقات تحقق إضافية تبطئ السرعة
+            // إرجاع مخرجات الـ Stream والبدائل مجهزة بالكامل
             return res.json({
                 id_live: liveData.id_live || id_live,
                 name: liveData.name || "",
@@ -920,8 +968,6 @@ app.get("/live_id/:id_live", async (req, res) => {
         res.status(500).json({ error: true, message: error.message });
     }
 });
-
-
 
 
 
