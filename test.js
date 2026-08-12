@@ -508,7 +508,7 @@ app.get("/channels", async (req, res) => {
 
 
 // ==========================================
-// 2. مسار /stream (مبسط: يطلب، يفك التشفير، ويعرض النتيجة كما هي)
+// مسار /stream (مبسط: يطلب، يفك التشفير، ويعرض الرد الأصلي فقط)
 // ==========================================
 app.get("/stream", async (req, res) => {
     try {
@@ -517,7 +517,7 @@ app.get("/stream", async (req, res) => {
             return res.status(400).json({ error: true, message: "يرجى إرسال id_live" });
         }
 
-        console.log(`📺 جلب السيرفرات وعرضها مباشرة: ${id_live}`);
+        console.log(`📺 جلب الرد الأصلي للقناة: ${id_live}`);
 
         const postData = {
             "user_id": "_82668_1785761367217_notloggedin.com_dramalive3",
@@ -531,10 +531,10 @@ app.get("/stream", async (req, res) => {
             "type": "tv", "id_live": id_live, "id": id_live, "live_id": id_live, "channel_id": id_live
         };
 
-        // تشفير الطلب
+        // 1. تشفير الطلب
         const encryptedBody = encryptAES(JSON.stringify(postData));
         
-        // إرسال الطلب للسيرفر
+        // 2. إرسال الطلب للسيرفر الأساسي
         const response = await axios.post("http://live.1spbgmu.com/api/live/livedrama/v13.0.0/getLiveAllStreamsById", encryptedBody, {
             headers: { 
                 "Content-Type": "text/plain", 
@@ -542,24 +542,29 @@ app.get("/stream", async (req, res) => {
                 "Host": "live.1spbgmu.com", 
                 "Connection": "Keep-Alive" 
             },
-            timeout: 30000, 
-            responseType: "arraybuffer"
+            timeout: 15000, 
+            responseType: "arraybuffer" // مهم لاستقبال البيانات كـ Buffer قبل فك التشفير
         });
 
-        // فك تشفير الرد
-        const decryptedResponse = decryptAES(Buffer.from(response.data).toString("utf-8"));
-        const rawJson = JSON.parse(decryptedResponse);
+        // 3. فك تشفير الرد
+        const encryptedResponse = Buffer.from(response.data).toString("utf-8");
+        const decryptedResponse = decryptAES(encryptedResponse);
+        const jsonResponse = JSON.parse(decryptedResponse);
 
-        // عرض الرد كما هو تماماً بدون أي تعديلات أو إضافات
-        res.json(rawJson);
+        // 4. عرض الـ JSON الأصلي كما هو
+        res.json(jsonResponse);
 
     } catch (error) { 
-        console.error(`❌ خطأ في مسار /stream: ${error.message}`);
-        res.status(500).json({ error: true, message: error.message }); 
+        // رسالة الخطأ المحدثة لمعرفة مصدر الـ Not Found
+        const status = error.response ? error.response.status : null;
+        console.error(`❌ خطأ في جلب السيرفرات: ${status || error.message}`);
+        
+        res.status(500).json({ 
+            error: true, 
+            message: status ? `السيرفر الأساسي رد بخطأ: ${status}` : error.message 
+        }); 
     }
 });
-
-
 
 
 
