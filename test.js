@@ -509,8 +509,6 @@ app.get("/channels", async (req, res) => {
 
 // ==========================================
 // مسار /stream 
-// (المسار الرئيسي: يعرض كل السيرفرات بهيكل المشغل)
-// (طلب سيرفر محدد مثل &s1: يعرض الرد الخام المفكوك من السيرفر كما هو)
 // ==========================================
 const DEFAULT_USER_AGENT = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/149.0.0.0 Safari/537.36";
 
@@ -529,8 +527,6 @@ app.get("/stream", async (req, res) => {
                 break;
             }
         }
-
-        console.log(`📺 جلب القناة: ${id_live} ${requestedServerIndex !== -1 ? `[طلب الرد الخام لسيرفر s${requestedServerIndex + 1}]` : '[هيكل المشغل الكامل]'}`);
 
         // 1. جلب البيانات الأساسية من السيرفر الأول
         const postData = {
@@ -585,13 +581,14 @@ app.get("/stream", async (req, res) => {
         }
 
         // =======================================================
-        // الحالة الأولى: المستخدم طلب سيرفر محدد (عرض الرد الخام)
+        // الحالة الأولى: المستخدم طلب سيرفر محدد (مثل &s2)
+        // النتيجة: يُرجع "الهيكل الأول" (Raw JSON من سيرفر redirect)
         // =======================================================
         if (requestedServerIndex !== -1) {
             if (requestedServerIndex >= rawStreams.length) {
                 return res.status(404).json({
                     error: true,
-                    message: `السيرفر s${requestedServerIndex + 1} غير متوفر. المتاح: ${rawStreams.length} سيرفرات`
+                    message: `السيرفر s${requestedServerIndex + 1} غير متوفر.`
                 });
             }
 
@@ -624,10 +621,10 @@ app.get("/stream", async (req, res) => {
                     responseType: "arraybuffer"
                 });
 
-                // فك التشفير وعرضه مباشرة كما هو من السيرفر
                 const decryptedStr = decryptAES(Buffer.from(redirectRes.data).toString("utf-8"));
                 const parsedRedirect = JSON.parse(decryptedStr);
                 
+                // إرجاع الهيكل الأول تماماً كما هو
                 return res.json(parsedRedirect);
             } else {
                 return res.json({
@@ -638,7 +635,8 @@ app.get("/stream", async (req, res) => {
         }
 
         // =======================================================
-        // الحالة الثانية: المسار الرئيسي بدون تحديد (تطبيق هيكل المشغل)
+        // الحالة الثانية: المسار الرئيسي بدون تحديد
+        // النتيجة: يُرجع "الهيكل الثاني" (مصفوفة streams جاهزة للمشغل)
         // =======================================================
         let finalStreamsList = [];
         let serverCounter = 1;
@@ -685,7 +683,7 @@ app.get("/stream", async (req, res) => {
                         }
                     }
                 } catch (err) {
-                    console.error(`❌ خطأ أثناء جلب redirect للسيرفر ${serverCounter}:`, err.message);
+                    console.error(`❌ خطأ في redirect للسيرفر ${serverCounter}:`, err.message);
                 }
             } else {
                 try {
@@ -695,6 +693,7 @@ app.get("/stream", async (req, res) => {
                 }
             }
 
+            // بناء العنصر الواحد داخل المصفوفة بنفس المفاتيح المطلوبة
             if (streamDataObj) {
                 const finalUrl = streamDataObj.url || "";
                 const finalAgent = streamDataObj.agent || item.agent || DEFAULT_USER_AGENT;
@@ -723,6 +722,7 @@ app.get("/stream", async (req, res) => {
             }
         }
 
+        // إرجاع الهيكل الثاني
         res.json({
             "id_live": liveData.id_live || id_live,
             "name": liveData.name || "",
@@ -731,15 +731,12 @@ app.get("/stream", async (req, res) => {
         });
 
     } catch (error) { 
-        const status = error.response ? error.response.status : null;
-        console.error(`❌ خطأ في مسار /stream: ${status || error.message}`);
-        
-        res.status(500).json({ 
-            error: true, 
-            message: status ? `السيرفر الأساسي رد بخطأ: ${status}` : error.message 
-        }); 
+        console.error(`❌ خطأ:`, error.message);
+        res.status(500).json({ error: true, message: error.message }); 
     }
 });
+
+
 
 
 
