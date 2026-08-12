@@ -508,7 +508,7 @@ app.get("/channels", async (req, res) => {
 
 
 // ==========================================
-// مسار /stream (يعرض الرد الأصلي، أو يفك تشفير سيرفر محدد إذا تم طلب &s1, &s2 الخ)
+// مسار /stream (يدعم جلب الرد الأصلي، أو جلب سيرفر محدد مثل &s1)
 // ==========================================
 app.get("/stream", async (req, res) => {
     try {
@@ -517,18 +517,18 @@ app.get("/stream", async (req, res) => {
             return res.status(400).json({ error: true, message: "يرجى إرسال id_live" });
         }
 
-        // 1. البحث عن بارامتر السيرفر (مثل s1, s2, s3) في الطلب
+        // 1. تحديد السيرفر المطلوب من الرابط (مثل s1, s2, s3)
         let requestedServerIndex = -1;
         for (const key in req.query) {
             if (key.match(/^s\d+$/)) {
-                // s1 تعني العنصر رقم 0 (لأن المصفوفة تبدأ من 0)
-                requestedServerIndex = parseInt(key.substring(1)) - 1; 
+                requestedServerIndex = parseInt(key.substring(1)) - 1; // s1 تعني العنصر 0
                 break;
             }
         }
 
-        console.log(`📺 جلب القناة: ${id_live} ${requestedServerIndex !== -1 ? `(طلب سيرفر محدد: s${requestedServerIndex + 1})` : '(جلب الرد الأصلي بالكامل)'}`);
+        console.log(`📺 طلب القناة: ${id_live} ${requestedServerIndex !== -1 ? `[سيرفر s${requestedServerIndex + 1}]` : '[الرد الكامل]'}`);
 
+        // 2. جلب البيانات الأساسية من السيرفر الأول
         const postData = {
             "user_id": "_82668_1785761367217_notloggedin.com_dramalive3",
             "device_id": "e603540e-ed93-47a3-bec6-a15f7f056604",
@@ -536,13 +536,12 @@ app.get("/stream", async (req, res) => {
             "timezone": "Europe/Istanbul", "device_type": "phone",
             "KEY_ACTIVATED_TYPE": "232425", "store": "direct",
             "isStoreVersion": false, "isPremium": false, "isCoupon_active": false, "hideAds": false,
-            "appCount": "{\"adsFailed\":73,\"adsLoaded\":56,\"adsShowed\":17,\"runCount\":8}",
+            "appCount": "{\"adsFailed\":468,\"adsLoaded\":240,\"adsShowed\":116,\"runCount\":54}",
             "mainServer": "http://main.eastgoessouth.online/api/live/livedrama/v13.0.0/",
             "type": "tv", "id_live": id_live, "id": id_live, "live_id": id_live, "channel_id": id_live
         };
 
         const encryptedBody = encryptAES(JSON.stringify(postData));
-        
         const response = await axios.post("http://live.1spbgmu.com/api/live/livedrama/v13.0.0/getLiveAllStreamsById", encryptedBody, {
             headers: { 
                 "Content-Type": "text/plain", 
@@ -554,17 +553,15 @@ app.get("/stream", async (req, res) => {
             responseType: "arraybuffer" 
         });
 
-        const encryptedResponse = Buffer.from(response.data).toString("utf-8");
-        const decryptedResponse = decryptAES(encryptedResponse);
+        const decryptedResponse = decryptAES(Buffer.from(response.data).toString("utf-8"));
         const jsonResponse = JSON.parse(decryptedResponse);
 
-        // 2. إذا لم يتم طلب سيرفر محدد في الرابط (يعني الرابط كان بدون &s1)، نعرض الرد الأصلي كاملاً وننهي العملية
+        // إذا لم يحدد المستخدم سيرفر مع السلسلة (مثلاً لم يكتب &s1)، نرجع الرد الأصلي كاملاً
         if (requestedServerIndex === -1) {
             return res.json(jsonResponse);
         }
 
-        // 3. --- هنا تبدأ معالجة السيرفر المحدد ---
-        // بناء قائمة السيرفرات داخلياً في الذاكرة لكي نختار السيرفر المطلوب
+        // 3. استخراج قائمة السيرفرات بالترتيب
         const liveData = jsonResponse.live || {};
         let allStreams = [];
 
@@ -588,42 +585,63 @@ app.get("/stream", async (req, res) => {
             }
         }
 
-        // التأكد من أن السيرفر المطلوب मौजूद ضمن الروابط (لتفادي الأخطاء إذا طلب المستخدم &s10 وكان هناك 5 سيرفرات فقط)
+        // التحقق من وجود السيرفر المطلوب
         if (requestedServerIndex >= allStreams.length) {
             return res.status(404).json({ 
                 error: true, 
-                message: `السيرفر s${requestedServerIndex + 1} غير متوفر. عدد السيرفرات المتاحة هو ${allStreams.length}` 
+                message: `السيرفر s${requestedServerIndex + 1} غير موجود. المتاح فقط: ${allStreams.length} سيرفرات` 
             });
         }
 
         const targetStream = allStreams[requestedServerIndex];
 
-        // 4. إرسال الطلب للسيرفر المحدد وفك تشفيره
+        // 4. إرسال الطلب لسيرفر ה- Redirect بـ Payload المباشر والدقيق
         if (targetStream.agent === "redirect") {
-            try {
-                let urlToSend = targetStream.url;
-                if (urlToSend.includes(".LS.V2") && urlToSend.endsWith("/s")) {
-                    urlToSend = convertFakeUrlToRealUrl(urlToSend, id_live);
-                }
-                
-                // استخدام دالة sendRequest لإرسال الطلب للرابط المطلوب وفك تشفيره
-                const redirectResult = await sendRequest(id_live, urlToSend, "redirect", "", "getLiveByRedirect");
-                
-                // إرجاع الرد الأصلي المفكوك للسيرفر فقط كما طلبت
-                return res.json(redirectResult.decrypted_response);
-            } catch (err) {
-                return res.status(500).json({ 
-                    error: true, 
-                    message: `فشل في فك redirect للسيرفر s${requestedServerIndex + 1}`, 
-                    details: err.message 
-                });
-            }
-        } 
+            const redirectPayload = {
+                "user_id": "_82668_1785761367217_notloggedin.com_dramalive3",
+                "device_id": "e603540e-ed93-47a3-bec6-a15f7f056604",
+                "device_api": "28", 
+                "version_name": "187", 
+                "language": "ar",
+                "timezone": "Europe/Istanbul", 
+                "device_type": "phone",
+                "KEY_ACTIVATED_TYPE": "232425", 
+                "store": "direct",
+                "isStoreVersion": false, 
+                "isPremium": false, 
+                "isCoupon_active": false, 
+                "hideAds": false,
+                "appCount": "{\"adsFailed\":468,\"adsLoaded\":240,\"adsShowed\":116,\"runCount\":54}",
+                "mainServer": "http://main.eastgoessouth.online/api/live/livedrama/v13.0.0/",
+                "id": id_live,
+                "url": targetStream.url, // الرابط الأصلي الخام بدون أي تغيير
+                "agent": "redirect"
+            };
 
-        // إذا كان السيرفر مباشر ولا يحتاج فك redirect، نقوم بعرض بياناته كما هي
+            const encryptedRedirectBody = encryptAES(JSON.stringify(redirectPayload));
+
+            const redirectResponse = await axios.post("http://redirect.1spbgmu.com/redirect/getLiveByRedirect", encryptedRedirectBody, {
+                headers: { 
+                    "Content-Type": "text/plain", 
+                    "User-Agent": "Dalvik/2.1.0 (Linux; U; Android 9; SM-S908E Build/TP1A.220624.014)", 
+                    "Host": "redirect.1spbgmu.com", 
+                    "Connection": "Keep-Alive" 
+                },
+                timeout: 15000, 
+                responseType: "arraybuffer"
+            });
+
+            // فك تشفير الرد وإرجاعه للمستخدم
+            const decryptedRedirectStr = decryptAES(Buffer.from(redirectResponse.data).toString("utf-8"));
+            const finalRedirectJson = JSON.parse(decryptedRedirectStr);
+
+            return res.json(finalRedirectJson);
+        }
+
+        // إذا لم يكن السيرفر من نوع redirect
         return res.json({
             message: `السيرفر s${requestedServerIndex + 1} ليس من نوع redirect`,
-            stream_data: targetStream
+            stream: targetStream
         });
 
     } catch (error) { 
@@ -632,7 +650,7 @@ app.get("/stream", async (req, res) => {
         
         res.status(500).json({ 
             error: true, 
-            message: status ? `السيرفر الأساسي رد بخطأ: ${status}` : error.message 
+            message: status ? `السيرفر رد بخطأ: ${status}` : error.message 
         }); 
     }
 });
