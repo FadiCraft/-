@@ -817,7 +817,7 @@ app.get("/get-redirect-data", async (req, res) => {
 
 
 // ==========================================
-// مسار ذكي: يجمع get-redirect-data + stream مع نفس منطق Double Redirect
+// مسار ذكي: يجمع get-redirect-data + stream مع فحص الرابط الفارغ
 // ==========================================
 app.get("/live_id/:id_live", async (req, res) => {
     try {
@@ -859,14 +859,41 @@ app.get("/live_id/:id_live", async (req, res) => {
             return res.status(404).json({ error: true, message: "لم يتم العثور على رابط أساسي لهذه القناة" });
         }
 
-        // 2. نفس منطق /get-redirect-data بالكامل
+        // 2. إرسال getLiveByRedirect
         let result = await sendRequest(id_live, mainUrl, "redirect", "", "getLiveByRedirect");
         let responseData = result.decrypted_response;
         let returnedUrl = responseData?.data?.url || "";
 
-        // 🎯 فحص: url === "1" → تحويل لـ stream
+        console.log(`📋 الرد الأول: ${returnedUrl}`);
+
+        // ═══════════════════════════════════════════
+        // 🎯 فحص شامل: هل الرابط "1" أو فارغ أو JSON بيه url=""
+        // ═══════════════════════════════════════════
+        let shouldSwitchToStream = false;
+
+        // فحص 1: "1" أو فارغ مباشرة
         if (returnedUrl === "1" || returnedUrl === "" || returnedUrl === "empty") {
-            console.log(`⚠️ الرابط "1" أو فارغ → تحويل مباشر لـ /stream`);
+            shouldSwitchToStream = true;
+        }
+
+        // فحص 2: إذا كان JSON نحاول نفكه ونشوف الـ url جواه
+        if (!shouldSwitchToStream) {
+            try {
+                const parsedUrl = JSON.parse(returnedUrl);
+                // لو الـ url فاضي أو "1"
+                if (!parsedUrl.url || parsedUrl.url === "" || parsedUrl.url === "1") {
+                    shouldSwitchToStream = true;
+                }
+            } catch(e) {
+                // مش JSON، نكمل عادي
+            }
+        }
+
+        // ═══════════════════════════════════════════
+        // ✅ إذا محتاج تحويل لـ stream
+        // ═══════════════════════════════════════════
+        if (shouldSwitchToStream) {
+            console.log(`⚠️ الرابط غير صالح (فارغ/"1"/JSON بدون رابط) → 🎯 تحويل مباشر لـ /stream`);
             
             let parsedStreams = [];
             const mainAgent = liveData.agent || "";
@@ -917,7 +944,9 @@ app.get("/live_id/:id_live", async (req, res) => {
             });
         }
 
-        // 🎯 نفس الفحص الذكي من /get-redirect-data
+        // ═══════════════════════════════════════════
+        // 🎯 الرابط صالح، نكمل Double Redirect إذا احتاج
+        // ═══════════════════════════════════════════
         let isDirectStream = false;
         let actualUrlObj = {};
         let actualUrl = returnedUrl;
@@ -932,18 +961,17 @@ app.get("/live_id/:id_live", async (req, res) => {
         const isGateway = actualUrl.includes("token.") || actualUrl.includes("?url=") || actualUrl.includes(".LS.V2");
         const hasStreamExt = actualUrl.includes(".m3u8") || actualUrl.includes(".mpd");
 
-        if (hasStreamExt && !isGateway && returnedUrl !== "1") {
+        if (hasStreamExt && !isGateway) {
             isDirectStream = true;
         }
 
-        // 🎯 إذا مش مباشر → Double Redirect (نفس منطق /get-redirect-data)
-        if (!isDirectStream && returnedUrl !== "1") {
+        if (!isDirectStream) {
             console.log(`🔄 الرابط غير مباشر، جاري تجهيز Double Redirect...`);
             let rawData = "";
 
             if (actualUrl.includes("token.easybroadcast.io")) {
                 try {
-                    console.log(`🔑 جاري استخراج التوكن من سيرفر EasyBroadcast...`);
+                    console.log(`🔑 جاري استخراج التوكن...`);
                     const tokenRes = await axios.get(actualUrl, { headers: actualHeaders });
                     
                     if (tokenRes.data && typeof tokenRes.data === 'object') {
@@ -960,19 +988,15 @@ app.get("/live_id/:id_live", async (req, res) => {
                 rawData = result.encrypted_response.trim();
             }
 
-            const nextAgent = "double_redirect";
-            result = await sendRequest(id_live, returnedUrl, nextAgent, rawData, "getLiveByDoubleRedirect");
+            result = await sendRequest(id_live, returnedUrl, "double_redirect", rawData, "getLiveByDoubleRedirect");
         }
 
-        // إرجاع النتيجة النهائية
         return res.json(result.decrypted_response);
 
     } catch (error) {
         res.status(500).json({ error: true, message: error.message });
     }
 });
-
-
 
 
 
