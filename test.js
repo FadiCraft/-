@@ -1,136 +1,19 @@
 const express = require("express");
 const axios = require("axios");
 const CryptoJS = require("crypto-js");
-const NodeCache = require("node-cache");
+const NodeCache = require("node-cache"); // 🆕 استدعاء مكتبة الكاش
 
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-// ==========================================
-// نظام الكاش المتكامل
-// ==========================================
-const cache = new NodeCache({
-    stdTTL: 600, // الوقت الافتراضي: 10 دقائق
-    checkperiod: 120, // فحص العناصر المنتهية كل دقيقتين
-    useClones: false, // تحسين الأداء
-    maxKeys: 1000 // الحد الأقصى للعناصر
-});
-
-// إعدادات الكاش المختلفة
-const CACHE_CONFIG = {
-    channels: { ttl: 300, enabled: true }, // 5 دقائق
-    streams: { ttl: 600, enabled: true }, // 10 دقائق
-    matches: { ttl: 300, enabled: true }, // 5 دقائق
-    redirect: { ttl: 900, enabled: true }, // 15 دقيقة
-    resolve: { ttl: 900, enabled: true }, // 15 دقيقة
-    topics: { ttl: 3600, enabled: true }, // ساعة واحدة
-    live_id: { ttl: 600, enabled: true }, // 10 دقائق
-    last: { ttl: 600, enabled: true } // 10 دقائق
-};
-
-// دالة مساعدة للحصول على بيانات من الكاش
-function getFromCache(key) {
-    try {
-        const value = cache.get(key);
-        if (value !== undefined) {
-            console.log(`✅ [CACHE] تم استرجاع البيانات من الكاش: ${key}`);
-            return { hit: true, data: value };
-        }
-        return { hit: false, data: null };
-    } catch (error) {
-        console.error(`❌ [CACHE] خطأ في قراءة الكاش:`, error.message);
-        return { hit: false, data: null };
-    }
-}
-
-// دالة مساعدة لحفظ البيانات في الكاش
-function setToCache(key, data, ttl = 600) {
-    try {
-        const success = cache.set(key, data, ttl);
-        if (success) {
-            console.log(`💾 [CACHE] تم حفظ البيانات في الكاش: ${key} (TTL: ${ttl}s)`);
-        }
-        return success;
-    } catch (error) {
-        console.error(`❌ [CACHE] خطأ في حفظ الكاش:`, error.message);
-        return false;
-    }
-}
-
-// دالة لحذف عنصر من الكاش
-function deleteFromCache(key) {
-    try {
-        const deleted = cache.del(key);
-        if (deleted > 0) {
-            console.log(`🗑️ [CACHE] تم حذف البيانات من الكاش: ${key}`);
-        }
-        return deleted;
-    } catch (error) {
-        console.error(`❌ [CACHE] خطأ في حذف الكاش:`, error.message);
-        return 0;
-    }
-}
-
-// دالة لمسح الكاش بالكامل
-function clearAllCache() {
-    try {
-        const keys = cache.keys();
-        const cleared = cache.flushAll();
-        console.log(`🧹 [CACHE] تم مسح الكاش بالكامل (${keys.length} عنصر)`);
-        return cleared;
-    } catch (error) {
-        console.error(`❌ [CACHE] خطأ في مسح الكاش:`, error.message);
-        return false;
-    }
-}
-
-// دالة لمسح كاش محدد حسب البادئة
-function clearCacheByPrefix(prefix) {
-    try {
-        const keys = cache.keys().filter(key => key.startsWith(prefix));
-        let count = 0;
-        keys.forEach(key => {
-            if (cache.del(key) > 0) count++;
-        });
-        console.log(`🧹 [CACHE] تم مسح ${count} عنصر بالبادئة: ${prefix}`);
-        return count;
-    } catch (error) {
-        console.error(`❌ [CACHE] خطأ في مسح الكاش:`, error.message);
-        return 0;
-    }
-}
-
-// دالة للحصول على إحصائيات الكاش
-function getCacheStats() {
-    try {
-        const stats = cache.getStats();
-        const keys = cache.keys();
-        const ttlInfo = {};
-        
-        keys.forEach(key => {
-            const ttl = cache.getTtl(key);
-            if (ttl) {
-                ttlInfo[key] = {
-                    expiresAt: new Date(ttl).toISOString(),
-                    remainingSeconds: Math.floor((ttl - Date.now()) / 1000)
-                };
-            }
-        });
-        
-        return {
-            ...stats,
-            totalKeys: keys.length,
-            keys: keys,
-            ttlInfo: ttlInfo
-        };
-    } catch (error) {
-        console.error(`❌ [CACHE] خطأ في جلب إحصائيات الكاش:`, error.message);
-        return { error: error.message };
-    }
-}
-
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
+
+// ==========================================
+// 🆕 إعداد نظام الكاش
+// ==========================================
+// المدة الافتراضية للكاش هي 300 ثانية (5 دقائق)، ويتم تنظيف الكاش المنتهي كل 60 ثانية
+const appCache = new NodeCache({ stdTTL: 300, checkperiod: 60 });
 
 const KEY = CryptoJS.enc.Utf8.parse("0123456789abcdef");
 const IV = CryptoJS.enc.Utf8.parse("fedcba9876543210");
@@ -185,12 +68,11 @@ const DEFAULT_HEADERS = {
 };
 
 // ==========================================
-// 🆕 دالة: استخراج جميع البيانات من data.url (آخر رد)
+// دالة: استخراج جميع البيانات من data.url
 // ==========================================
 function parseDataUrl(dataUrl, fallbackAgent) {
     try {
         const obj = JSON.parse(dataUrl);
-        
         const streamUrl = obj.url || "";
         const agent = obj.agent || fallbackAgent || DEFAULT_AGENT;
         const mediatype = obj.mediatype || (streamUrl.includes(".mpd") ? "dash" : streamUrl.includes(".m3u8") ? "hls" : null);
@@ -240,13 +122,6 @@ function createServerObject(serverName, url, agent, headers, drm, mediatype) {
 // دالة: زيارة رابط وسيط
 // ==========================================
 async function fetchIntermediateUrl(url, headers = {}, agent = null) {
-    // محاولة جلب من الكاش أولاً
-    const cacheKey = `intermediate:${url}`;
-    const cacheResult = getFromCache(cacheKey);
-    if (cacheResult.hit) {
-        return cacheResult.data;
-    }
-    
     try {
         const requestHeaders = {
             "User-Agent": agent || DEFAULT_AGENT,
@@ -283,20 +158,13 @@ async function fetchIntermediateUrl(url, headers = {}, agent = null) {
             }
         }
 
-        const result = streamUrl ? {
+        return streamUrl ? {
             success: true,
             url: streamUrl,
             agent: agent || DEFAULT_AGENT,
             headers: headers || {},
             mediatype: streamUrl.includes(".mpd") ? "dash" : "hls"
         } : { success: false };
-        
-        // حفظ في الكاش
-        if (result.success) {
-            setToCache(cacheKey, result, 300); // 5 دقائق
-        }
-        
-        return result;
 
     } catch (e) {
         return { success: false, error: e.message };
@@ -307,15 +175,6 @@ async function fetchIntermediateUrl(url, headers = {}, agent = null) {
 // دالة: إرسال طلب للسيرفر
 // ==========================================
 async function sendRequest(channelId, urlData, agent, encryptedRawData = "", endpoint = "getLiveByRedirect") {
-    // إنشاء مفتاح كاش فريد للطلب
-    const cacheKey = `redirect:${endpoint}:${channelId}:${urlData.substring(0, 100)}`;
-    
-    // محاولة جلب من الكاش
-    const cacheResult = getFromCache(cacheKey);
-    if (cacheResult.hit) {
-        return cacheResult.data;
-    }
-    
     const postData = {
         "user_id": "_82668_1785761367217_notloggedin.com_dramalive3",
         "device_id": "e603540e-ed93-47a3-bec6-a15f7f056604",
@@ -360,33 +219,20 @@ async function sendRequest(channelId, urlData, agent, encryptedRawData = "", end
     const decryptedResponse = decryptAES(encryptedResponse);
     const jsonResponse = JSON.parse(decryptedResponse);
 
-    const result = {
+    return {
         encrypted_response: encryptedResponse,
         decrypted_response: jsonResponse
     };
-    
-    // حفظ في الكاش لمدة 15 دقيقة
-    setToCache(cacheKey, result, CACHE_CONFIG.redirect.ttl);
-    
-    return result;
 }
 
 // ==========================================
-// 🆕 دالة: حل رابط redirect - ترجع البيانات كاملة من آخر رد
+// دالة: حل رابط redirect
 // ==========================================
 async function resolveRedirectUrl(channelId, fakeUrl) {
-    // محاولة جلب من الكاش
-    const cacheKey = `resolve:${channelId}:${fakeUrl}`;
-    const cacheResult = getFromCache(cacheKey);
-    if (cacheResult.hit) {
-        return cacheResult.data;
-    }
-    
     let currentUrl = fakeUrl;
     let currentAgent = "redirect";
     let encryptedRawData = "";
     let maxSteps = 5;
-    
     let lastParsedData = null;
 
     while (maxSteps > 0) {
@@ -405,12 +251,10 @@ async function resolveRedirectUrl(channelId, fakeUrl) {
         if (!data || !data.url) return null;
 
         const newAgent = data.agent || "stop";
-        
         const parsed = parseDataUrl(data.url, null);
         lastParsedData = parsed;
         
         if (newAgent === "advanced" || newAgent === "stop") {
-            
             if (parsed.url && parsed.url.includes(".LS.V2")) {
                 if (result.encrypted_response && !encryptedRawData) {
                     encryptedRawData = result.encrypted_response.trim();
@@ -420,66 +264,52 @@ async function resolveRedirectUrl(channelId, fakeUrl) {
                 }
                 break;
             }
-            
             if (parsed.url && (parsed.url.includes(".m3u8") || parsed.url.includes(".mpd"))) {
-                const finalResult = {
+                return {
                     url: parsed.url,
                     agent: parsed.agent,
                     headers: parsed.headers,
                     drm: parsed.drm,
                     mediatype: parsed.mediatype
                 };
-                setToCache(cacheKey, finalResult, CACHE_CONFIG.resolve.ttl);
-                return finalResult;
             }
-            
             if (parsed.url && parsed.url.startsWith("http")) {
                 const fetchResult = await fetchIntermediateUrl(parsed.url, parsed.headers, parsed.agent);
-                
                 if (fetchResult.success) {
-                    const finalResult = {
+                    return {
                         url: fetchResult.url,
                         agent: parsed.agent,
                         headers: parsed.headers,
                         drm: parsed.drm,
                         mediatype: fetchResult.mediatype
                     };
-                    setToCache(cacheKey, finalResult, CACHE_CONFIG.resolve.ttl);
-                    return finalResult;
                 }
-                
                 if (parsed.iframe && parsed.iframe.startsWith("http")) {
                     const iframeResult = await fetchIntermediateUrl(parsed.iframe, parsed.headers, parsed.agent);
                     if (iframeResult.success) {
-                        const finalResult = {
+                        return {
                             url: iframeResult.url,
                             agent: parsed.agent,
                             headers: parsed.headers,
                             drm: parsed.drm,
                             mediatype: iframeResult.mediatype
                         };
-                        setToCache(cacheKey, finalResult, CACHE_CONFIG.resolve.ttl);
-                        return finalResult;
                     }
                 }
-                
                 if (result.encrypted_response && !encryptedRawData) {
                     encryptedRawData = result.encrypted_response.trim();
                     currentUrl = data.url;
                     currentAgent = "double_redirect";
                     continue;
                 }
-                
                 break;
             }
-            
             if (result.encrypted_response && !encryptedRawData) {
                 encryptedRawData = result.encrypted_response.trim();
                 currentUrl = data.url;
                 currentAgent = "double_redirect";
                 continue;
             }
-            
             break;
         }
         
@@ -494,25 +324,22 @@ async function resolveRedirectUrl(channelId, fakeUrl) {
     }
 
     if (lastParsedData && lastParsedData.url && lastParsedData.url.startsWith("http")) {
-        const finalResult = {
+        return {
             url: lastParsedData.url,
             agent: lastParsedData.agent,
             headers: lastParsedData.headers,
             drm: lastParsedData.drm,
             mediatype: lastParsedData.mediatype
         };
-        setToCache(cacheKey, finalResult, CACHE_CONFIG.resolve.ttl);
-        return finalResult;
     }
 
     return null;
 }
 
 // ==========================================
-// 🆕 دالة: معالجة سيرفر واحد
+// دالة: معالجة سيرفر واحد
 // ==========================================
 async function processServer(id_live, serverName, urlData, agentData) {
-    
     if (urlData && urlData.startsWith("{")) {
         let parsed;
         try {
@@ -529,84 +356,31 @@ async function processServer(id_live, serverName, urlData, agentData) {
         }
         
         const isRedirect = (parsed.agent === "redirect" || agentData === "redirect");
-        
         if (isRedirect && parsed.url) {
             console.log(`🔄 حل ${serverName}...`);
             const resolved = await resolveRedirectUrl(id_live, parsed.url);
-            
             if (resolved && resolved.url && (resolved.url.includes(".m3u8") || resolved.url.includes(".mpd"))) {
-                return createServerObject(
-                    serverName + " ",
-                    resolved.url,
-                    resolved.agent,
-                    resolved.headers,
-                    resolved.drm || parsed.drm,
-                    resolved.mediatype
-                );
+                return createServerObject(serverName + " ", resolved.url, resolved.agent, resolved.headers, resolved.drm || parsed.drm, resolved.mediatype);
             } else if (resolved && resolved.url) {
-                return createServerObject(
-                    serverName + " ⚠️",
-                    resolved.url,
-                    resolved.agent,
-                    resolved.headers,
-                    resolved.drm || parsed.drm,
-                    resolved.mediatype
-                );
+                return createServerObject(serverName + " ⚠️", resolved.url, resolved.agent, resolved.headers, resolved.drm || parsed.drm, resolved.mediatype);
             } else {
-                return createServerObject(
-                    serverName + "",
-                    parsed.url,
-                    parsed.agent,
-                    parsed.headers,
-                    parsed.drm,
-                    parsed.mediatype
-                );
+                return createServerObject(serverName + "", parsed.url, parsed.agent, parsed.headers, parsed.drm, parsed.mediatype);
             }
         } else {
-            return createServerObject(
-                serverName,
-                parsed.url,
-                parsed.agent,
-                parsed.headers,
-                parsed.drm,
-                parsed.mediatype
-            );
+            return createServerObject(serverName, parsed.url, parsed.agent, parsed.headers, parsed.drm, parsed.mediatype);
         }
     }
     
     const isRedirect = (agentData === "redirect");
-    
     if (isRedirect) {
         console.log(`🔄 حل ${serverName}...`);
         const resolved = await resolveRedirectUrl(id_live, urlData);
-        
         if (resolved && resolved.url && (resolved.url.includes(".m3u8") || resolved.url.includes(".mpd"))) {
-            return createServerObject(
-                serverName + "",
-                resolved.url,
-                resolved.agent,
-                resolved.headers,
-                resolved.drm,
-                resolved.mediatype
-            );
+            return createServerObject(serverName + "", resolved.url, resolved.agent, resolved.headers, resolved.drm, resolved.mediatype);
         } else if (resolved && resolved.url) {
-            return createServerObject(
-                serverName + " ",
-                resolved.url,
-                resolved.agent || DEFAULT_AGENT,
-                resolved.headers || DEFAULT_HEADERS,
-                resolved.drm,
-                resolved.mediatype
-            );
+            return createServerObject(serverName + " ", resolved.url, resolved.agent || DEFAULT_AGENT, resolved.headers || DEFAULT_HEADERS, resolved.drm, resolved.mediatype);
         } else {
-            return createServerObject(
-                serverName + " ",
-                "",
-                DEFAULT_AGENT,
-                DEFAULT_HEADERS,
-                null,
-                null
-            );
+            return createServerObject(serverName + " ", "", DEFAULT_AGENT, DEFAULT_HEADERS, null, null);
         }
     }
     
@@ -614,23 +388,18 @@ async function processServer(id_live, serverName, urlData, agentData) {
 }
 
 // ==========================================
-// 1. مسار جلب القنوات (مع الكاش)
+// 1. مسار جلب القنوات (مع الكاش 10 دقائق)
 // ==========================================
 app.get("/channels", async (req, res) => {
     try {
         const topic = req.query.topic || "arabic_sport";
+        const cacheKey = `channels_${topic}`;
         
-        // إنشاء مفتاح كاش
-        const cacheKey = `channels:${topic}`;
-        
-        // محاولة جلب من الكاش
-        if (CACHE_CONFIG.channels.enabled) {
-            const cacheResult = getFromCache(cacheKey);
-            if (cacheResult.hit) {
-                return res.json(cacheResult.data);
-            }
+        // 🆕 التحقق من الكاش
+        if (appCache.has(cacheKey)) {
+            return res.json(appCache.get(cacheKey));
         }
-        
+
         const postData = {
             "user_id": "_82668_1785761367217_notloggedin.com_dramalive3",
             "device_id": "e603540e-ed93-47a3-bec6-a15f7f056604",
@@ -662,43 +431,30 @@ app.get("/channels", async (req, res) => {
             url: ch.url || "", agent: ch.agent || "", backup: ch.backup || "",
             img_url: ch.img_url || "", id_topic: ch.id_topic || topic
         }));
-        
-        // حفظ في الكاش
-        if (CACHE_CONFIG.channels.enabled) {
-            setToCache(cacheKey, formattedChannels, CACHE_CONFIG.channels.ttl);
-        }
-        
+
+        // 🆕 حفظ النتيجة في الكاش لمدة 10 دقائق
+        appCache.set(cacheKey, formattedChannels, 600);
         res.json(formattedChannels);
-    } catch (error) { 
-        res.status(500).json({ error: true, message: error.message }); 
-    }
+    } catch (error) { res.status(500).json({ error: true, message: error.message }); }
 });
 
 // ==========================================
-// مسار /stream (مع الكاش)
+// 2. مسار /stream (مع الكاش)
 // ==========================================
-const DEFAULT_USER_AGENT = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/149.0.0.0 Safari/537.36";
-
 app.get("/stream", async (req, res) => {
     try {
         const id_live = req.query.id_live;
-        if (!id_live) {
-            return res.status(400).json({ error: true, message: "يرجى إرسال id_live" });
-        }
+        if (!id_live) return res.status(400).json({ error: true, message: "يرجى إرسال id_live" });
 
-        // إنشاء مفتاح كاش
-        const cacheKey = `stream:${id_live}`;
+        const cacheKey = `stream_${id_live}`;
         
-        // محاولة جلب من الكاش
-        if (CACHE_CONFIG.streams.enabled) {
-            const cacheResult = getFromCache(cacheKey);
-            if (cacheResult.hit) {
-                console.log(`📺 [CACHE] استرجاع سيرفرات القناة ${id_live} من الكاش`);
-                return res.json(cacheResult.data);
-            }
+        // 🆕 التحقق من الكاش
+        if (appCache.has(cacheKey)) {
+            console.log(`⚡ تقديم السيرفرات من الكاش: ${id_live}`);
+            return res.json(appCache.get(cacheKey));
         }
 
-        console.log(`📺 جلب ومعالجة كافة سيرفرات القناة: ${id_live}`);
+        console.log(`📺 جلب سيرفرات: ${id_live}`);
 
         const postData = {
             "user_id": "_82668_1785761367217_notloggedin.com_dramalive3",
@@ -707,125 +463,72 @@ app.get("/stream", async (req, res) => {
             "timezone": "Europe/Istanbul", "device_type": "phone",
             "KEY_ACTIVATED_TYPE": "232425", "store": "direct",
             "isStoreVersion": false, "isPremium": false, "isCoupon_active": false, "hideAds": false,
-            "appCount": "{\"adsFailed\":468,\"adsLoaded\":240,\"adsShowed\":116,\"runCount\":54}",
+            "appCount": "{\"adsFailed\":73,\"adsLoaded\":56,\"adsShowed\":17,\"runCount\":8}",
             "mainServer": "http://main.eastgoessouth.online/api/live/livedrama/v13.0.0/",
             "type": "tv", "id_live": id_live, "id": id_live, "live_id": id_live, "channel_id": id_live
         };
 
         const encryptedBody = encryptAES(JSON.stringify(postData));
         const response = await axios.post("http://live.1spbgmu.com/api/live/livedrama/v13.0.0/getLiveAllStreamsById", encryptedBody, {
-            headers: { 
-                "Content-Type": "text/plain", 
-                "User-Agent": "Dalvik/2.1.0 (Linux; U; Android 9; SM-S908E Build/TP1A.220624.014)", 
-                "Host": "live.1spbgmu.com", 
-                "Connection": "Keep-Alive" 
-            },
-            timeout: 15000, 
-            responseType: "arraybuffer" 
+            headers: { "Content-Type": "text/plain", "User-Agent": "Dalvik/2.1.0 (Linux; U; Android 9; SM-S908E Build/TP1A.220624.014)", "Host": "live.1spbgmu.com", "Connection": "Keep-Alive" },
+            timeout: 30000, responseType: "arraybuffer"
         });
 
         const decryptedResponse = decryptAES(Buffer.from(response.data).toString("utf-8"));
         const rawJson = JSON.parse(decryptedResponse);
         const liveData = rawJson.live || {};
 
-        let rawStreams = [];
-
-        if (liveData.url && liveData.url !== "empty") {
-            rawStreams.push({ url: liveData.url, agent: liveData.agent || "" });
+        let parsedStreams = [];
+        const mainUrl = liveData.url || "";
+        const mainAgent = liveData.agent || "";
+        if (mainUrl && mainUrl !== "empty") {
+            const server = await processServer(id_live, "temp", mainUrl, mainAgent);
+            parsedStreams.push(server);
         }
 
-        if (liveData.backup) {
-            const backupParts = liveData.backup.split("-;-");
-            for (const part of backupParts) {
-                const trimmedPart = part.trim();
-                if (!trimmedPart) continue;
-                
-                const subParts = trimmedPart.split("--");
+        const backupStr = liveData.backup || "";
+        if (backupStr) {
+            const backupParts = backupStr.split("-;-");
+            for (let i = 0; i < backupParts.length; i++) {
+                const part = backupParts[i].trim();
+                if (!part) continue;
+                const subParts = part.split("--");
                 const linkData = subParts[0] ? subParts[0].trim() : "";
                 const agentData = subParts[1] ? subParts[1].trim() : "";
-                
-                if (linkData && linkData !== "empty") {
-                    rawStreams.push({ url: linkData, agent: agentData });
-                }
+                if (!linkData || linkData === "empty") continue;
+                const server = await processServer(id_live, "temp", linkData, agentData);
+                parsedStreams.push(server);
             }
         }
 
-        let allServerResults = [];
+        parsedStreams.sort((a, b) => {
+            const urlA = (a.url || "").toLowerCase();
+            const urlB = (b.url || "").toLowerCase();
+            const getPriority = (url) => {
+                if (!url) return 4;
+                if (url.includes(".mpd")) return 1;
+                if (url.includes(".m3u8")) return 2;
+                return 3;
+            };
+            return getPriority(urlA) - getPriority(urlB);
+        });
 
-        for (const item of rawStreams) {
-            if (item.agent === "redirect") {
-                try {
-                    const redirectPayload = {
-                        "user_id": "_82668_1785761367217_notloggedin.com_dramalive3",
-                        "device_id": "e603540e-ed93-47a3-bec6-a15f7f056604",
-                        "device_api": "28", "version_name": "187", "language": "ar",
-                        "timezone": "Europe/Istanbul", "device_type": "phone",
-                        "KEY_ACTIVATED_TYPE": "232425", "store": "direct",
-                        "isStoreVersion": false, "isPremium": false, "isCoupon_active": false, "hideAds": false,
-                        "appCount": "{\"adsFailed\":468,\"adsLoaded\":240,\"adsShowed\":116,\"runCount\":54}",
-                        "mainServer": "http://main.eastgoessouth.online/api/live/livedrama/v13.0.0/",
-                        "id": id_live,
-                        "url": item.url,
-                        "agent": "redirect"
-                    };
+        parsedStreams.forEach((stream, index) => {
+            stream.server_name = `سيرفر ${index + 1}`;
+        });
 
-                    const encryptedRedirectBody = encryptAES(JSON.stringify(redirectPayload));
-                    const redirectRes = await axios.post("http://redirect.1spbgmu.com/redirect/getLiveByRedirect", encryptedRedirectBody, {
-                        headers: { 
-                            "Content-Type": "text/plain", 
-                            "User-Agent": "Dalvik/2.1.0 (Linux; U; Android 9; SM-S908E Build/TP1A.220624.014)", 
-                            "Host": "redirect.1spbgmu.com", 
-                            "Connection": "Keep-Alive" 
-                        },
-                        timeout: 15000, 
-                        responseType: "arraybuffer"
-                    });
+        const finalResult = {
+            id_live: liveData.id_live || id_live,
+            name: liveData.name || "",
+            img_url: liveData.img_url || "",
+            streams: parsedStreams
+        };
 
-                    const decryptedStr = decryptAES(Buffer.from(redirectRes.data).toString("utf-8"));
-                    const parsedRedirect = JSON.parse(decryptedStr);
+        // 🆕 حفظ النتيجة في الكاش
+        appCache.set(cacheKey, finalResult);
+        res.json(finalResult);
 
-                    allServerResults.push(parsedRedirect);
-                } catch (err) {
-                    console.error(`❌ خطأ في فك تشفير سيرفر redirect:`, err.message);
-                }
-            } else {
-                let innerUrlString = item.url;
-                if (!innerUrlString.startsWith("{")) {
-                    innerUrlString = JSON.stringify({
-                        "url": item.url,
-                        "agent": item.agent || DEFAULT_USER_AGENT,
-                        "acceptSSL": "1",
-                        "headers": {
-                            "User-Agent": item.agent || DEFAULT_USER_AGENT
-                        }
-                    });
-                }
-
-                allServerResults.push({
-                    "result": 0,
-                    "message": {
-                        "en": "operation succeeded",
-                        "ar": "تمت العملية بنجاح"
-                    },
-                    "data": {
-                        "url": innerUrlString,
-                        "agent": "advanced"
-                    }
-                });
-            }
-        }
-
-        // حفظ في الكاش
-        if (CACHE_CONFIG.streams.enabled) {
-            setToCache(cacheKey, allServerResults, CACHE_CONFIG.streams.ttl);
-        }
-
-        res.json(allServerResults);
-
-    } catch (error) { 
-        console.error(`❌ خطأ في مسار /stream:`, error.message);
-        res.status(500).json({ error: true, message: error.message }); 
-    }
+    } catch (error) { res.status(500).json({ error: true, message: error.message }); }
 });
 
 // ==========================================
@@ -837,19 +540,13 @@ app.post("/get-redirect-data", async (req, res) => {
         let url = req.body.url;
         const agent = req.body.agent || "redirect";
 
-        if (!id_live) {
-            return res.status(400).json({ error: true, message: "يرجى إرسال id_live في الـ Body" });
-        }
+        if (!id_live) return res.status(400).json({ error: true, message: "يرجى إرسال id_live في الـ Body" });
 
-        // إنشاء مفتاح كاش
-        const cacheKey = `redirect-data:${id_live}:${url || 'auto'}`;
+        const cacheKey = `redirect_post_${id_live}_${url || 'nourl'}`;
         
-        // محاولة جلب من الكاش
-        if (CACHE_CONFIG.redirect.enabled) {
-            const cacheResult = getFromCache(cacheKey);
-            if (cacheResult.hit) {
-                return res.json(cacheResult.data);
-            }
+        // 🆕 التحقق من الكاش
+        if (appCache.has(cacheKey)) {
+            return res.json(appCache.get(cacheKey));
         }
 
         if (!url) {
@@ -907,19 +604,13 @@ app.post("/get-redirect-data", async (req, res) => {
 
             if (actualUrl.includes("token.easybroadcast.io")) {
                 try {
-                    console.log(`🔑 جاري استخراج التوكن من سيرفر EasyBroadcast...`);
                     const tokenRes = await axios.get(actualUrl, { headers: actualHeaders });
-                    
                     if (tokenRes.data && typeof tokenRes.data === 'object') {
-                        rawData = Object.keys(tokenRes.data)
-                            .map(key => `${encodeURIComponent(key)}=${encodeURIComponent(tokenRes.data[key])}`)
-                            .join('&');
+                        rawData = Object.keys(tokenRes.data).map(key => `${encodeURIComponent(key)}=${encodeURIComponent(tokenRes.data[key])}`).join('&');
                     } else if (typeof tokenRes.data === 'string') {
                         rawData = tokenRes.data;
                     }
-                } catch (err) {
-                    console.log(`⚠️ فشل جلب التوكن: ${err.message}`);
-                }
+                } catch (err) {}
             } else if (result.encrypted_response) {
                 rawData = result.encrypted_response.trim();
             }
@@ -928,16 +619,11 @@ app.post("/get-redirect-data", async (req, res) => {
             result = await sendRequest(id_live, returnedUrl, nextAgent, rawData, "getLiveByDoubleRedirect");
         }
 
-        // حفظ في الكاش
-        if (CACHE_CONFIG.redirect.enabled) {
-            setToCache(cacheKey, result.decrypted_response, CACHE_CONFIG.redirect.ttl);
-        }
-
+        // 🆕 حفظ في الكاش
+        appCache.set(cacheKey, result.decrypted_response);
         res.json(result.decrypted_response);
 
-    } catch (error) {
-        res.status(500).json({ error: true, message: error.message });
-    }
+    } catch (error) { res.status(500).json({ error: true, message: error.message }); }
 });
 
 // ==========================================
@@ -946,21 +632,13 @@ app.post("/get-redirect-data", async (req, res) => {
 app.get("/get-redirect-data", async (req, res) => {
     try {
         const id_live = req.query.id_live;
+        if (!id_live) return res.status(400).json({ error: true, message: "يرجى إرسال id_live في الرابط" });
 
-        if (!id_live) {
-            return res.status(400).json({ error: true, message: "يرجى إرسال id_live في الرابط" });
-        }
-
-        // إنشاء مفتاح كاش
-        const cacheKey = `redirect-data:${id_live}`;
+        const cacheKey = `redirect_get_${id_live}`;
         
-        // محاولة جلب من الكاش
-        if (CACHE_CONFIG.redirect.enabled) {
-            const cacheResult = getFromCache(cacheKey);
-            if (cacheResult.hit) {
-                console.log(`🔍 [CACHE] استرجاع بيانات redirect من الكاش: ${id_live}`);
-                return res.json(cacheResult.data);
-            }
+        // 🆕 التحقق من الكاش
+        if (appCache.has(cacheKey)) {
+            return res.json(appCache.get(cacheKey));
         }
 
         console.log(`🔍 [GET] جلب الرابط الأساسي لقناة: ${id_live}`);
@@ -978,8 +656,7 @@ app.get("/get-redirect-data", async (req, res) => {
         const encryptedStreamBody = encryptAES(JSON.stringify(streamsPostData));
         const streamRes = await axios.post("http://live.1spbgmu.com/api/live/livedrama/v13.0.0/getLiveAllStreamsById", encryptedStreamBody, {
             headers: { "Content-Type": "text/plain", "User-Agent": "Dalvik/2.1.0 (Linux; U; Android 9; SM-S908E Build/TP1A.220624.014)", "Host": "live.1spbgmu.com", "Connection": "Keep-Alive" },
-            responseType: "arraybuffer",
-            timeout: 15000
+            responseType: "arraybuffer", timeout: 15000
         });
         
         const decryptedStreamRes = decryptAES(Buffer.from(streamRes.data).toString("utf-8"));
@@ -1018,19 +695,13 @@ app.get("/get-redirect-data", async (req, res) => {
 
             if (actualUrl.includes("token.easybroadcast.io")) {
                 try {
-                    console.log(`🔑 جاري استخراج التوكن من سيرفر EasyBroadcast...`);
                     const tokenRes = await axios.get(actualUrl, { headers: actualHeaders });
-                    
                     if (tokenRes.data && typeof tokenRes.data === 'object') {
-                        rawData = Object.keys(tokenRes.data)
-                            .map(key => `${encodeURIComponent(key)}=${encodeURIComponent(tokenRes.data[key])}`)
-                            .join('&');
+                        rawData = Object.keys(tokenRes.data).map(key => `${encodeURIComponent(key)}=${encodeURIComponent(tokenRes.data[key])}`).join('&');
                     } else if (typeof tokenRes.data === 'string') {
                         rawData = tokenRes.data;
                     }
-                } catch (err) {
-                    console.log(`⚠️ فشل جلب التوكن: ${err.message}`);
-                }
+                } catch (err) {}
             } else if (result.encrypted_response) {
                 rawData = result.encrypted_response.trim();
             }
@@ -1039,43 +710,30 @@ app.get("/get-redirect-data", async (req, res) => {
             result = await sendRequest(id_live, returnedUrl, nextAgent, rawData, "getLiveByDoubleRedirect");
         }
 
-        // حفظ في الكاش
-        if (CACHE_CONFIG.redirect.enabled) {
-            setToCache(cacheKey, result.decrypted_response, CACHE_CONFIG.redirect.ttl);
-        }
-
+        // 🆕 حفظ في الكاش
+        appCache.set(cacheKey, result.decrypted_response);
         res.json(result.decrypted_response);
 
-    } catch (error) {
-        res.status(500).json({ error: true, message: error.message });
-    }
+    } catch (error) { res.status(500).json({ error: true, message: error.message }); }
 });
 
 // ==========================================
-// 🆕 المسار الذكي المدمج (مع الكاش)
+// 🆕 المسار الذكي المدمج (مع الكاش المباشر لتوفير استدعاء الروابط الداخلية)
 // ==========================================
 app.get("/live_id/:id", async (req, res) => {
     try {
         const id_live = req.params.id;
-        
-        if (!id_live) {
-            return res.status(400).json({ error: true, message: "يرجى إرسال id في الرابط" });
-        }
+        if (!id_live) return res.status(400).json({ error: true, message: "يرجى إرسال id في الرابط" });
 
-        // إنشاء مفتاح كاش
-        const cacheKey = `live_id:${id_live}`;
+        const cacheKey = `smart_live_${id_live}`;
         
-        // محاولة جلب من الكاش
-        if (CACHE_CONFIG.live_id.enabled) {
-            const cacheResult = getFromCache(cacheKey);
-            if (cacheResult.hit) {
-                console.log(`🤖 [CACHE] استرجاع بيانات القناة ${id_live} من الكاش`);
-                return res.json(cacheResult.data);
-            }
+        // 🆕 التحقق من الكاش للمسار الذكي
+        if (appCache.has(cacheKey)) {
+            console.log(`⚡ [المسار الذكي] تقديم القناة من الكاش: ${id_live}`);
+            return res.json(appCache.get(cacheKey));
         }
 
         console.log(`🤖 [المسار الذكي] جاري فحص القناة: ${id_live}`);
-
         const localBaseUrl = `http://localhost:${PORT}`;
 
         try {
@@ -1085,17 +743,10 @@ app.get("/live_id/:id", async (req, res) => {
 
             if (returnedUrl && returnedUrl !== "1" && returnedUrl !== "empty") {
                 console.log(`✅ [المسار الذكي] تم الحصول على رابط مباشر للقناة ${id_live}`);
-                
-                // حفظ في الكاش
-                if (CACHE_CONFIG.live_id.enabled) {
-                    setToCache(cacheKey, redirectData, CACHE_CONFIG.live_id.ttl);
-                }
-                
+                appCache.set(cacheKey, redirectData); // حفظ في الكاش
                 return res.json(redirectData);
             }
-        } catch (err) {
-            console.log(`⚠️ فشل أو خطأ في مسار Redirect، سيتم الانتقال لمسار Stream...`);
-        }
+        } catch (err) {}
 
         console.log(`🔄 [المسار الذكي] النتيجة غير صالحة (1)، جاري استدعاء مسار السيرفرات الكاملة...`);
         const streamResponse = await axios.get(`${localBaseUrl}/stream?id_live=${id_live}`);
@@ -1108,57 +759,36 @@ app.get("/live_id/:id", async (req, res) => {
 
         if (hasValidStreams) {
             console.log(`✅ [المسار الذكي] تم العثور على سيرفرات تعمل للقناة ${id_live}`);
-            
-            // حفظ في الكاش
-            if (CACHE_CONFIG.live_id.enabled) {
-                setToCache(cacheKey, streamData, CACHE_CONFIG.live_id.ttl);
-            }
-            
+            appCache.set(cacheKey, streamData); // حفظ في الكاش
             return res.json(streamData);
         }
 
         console.log(`⚠️ تحذير: جميع السيرفرات فارغة! جاري التحويل إلى مسار البديل /last/ لقناة: ${id_live}`);
-        
         try {
             const lastResponse = await axios.get(`${localBaseUrl}/last/${id_live}`);
-            
-            // حفظ في الكاش
-            if (CACHE_CONFIG.live_id.enabled) {
-                setToCache(cacheKey, lastResponse.data, CACHE_CONFIG.live_id.ttl);
-            }
-            
+            appCache.set(cacheKey, lastResponse.data); // حفظ في الكاش
             return res.json(lastResponse.data);
         } catch (lastErr) {
-            console.log(`❌ فشل مسار /last: ${lastErr.message}`);
+            appCache.set(cacheKey, streamData); // حفظ في الكاش حتى في حالة الخطأ لعدم إغراق السيرفر
             return res.json(streamData);
         }
 
-    } catch (error) {
-        res.status(500).json({ error: true, message: "حدث خطأ أثناء معالجة المسار الذكي: " + error.message });
-    }
+    } catch (error) { res.status(500).json({ error: true, message: "حدث خطأ أثناء معالجة المسار الذكي: " + error.message }); }
 });
 
 // ==========================================
-// مسار مشترك: /last/ (مع الكاش)
+// مسار مشترك: جلب بيانات الـ Redirect (مع الكاش)
 // ==========================================
 app.get("/last/:id_live", async (req, res) => {
     try {
         const id_live = req.params.id_live;
-        
-        if (!id_live) {
-            return res.status(400).json({ error: true, message: "يرجى إرسال id_live في المسار" });
-        }
+        if (!id_live) return res.status(400).json({ error: true, message: "يرجى إرسال id_live في المسار" });
 
-        // إنشاء مفتاح كاش
-        const cacheKey = `last:${id_live}`;
+        const cacheKey = `last_${id_live}`;
         
-        // محاولة جلب من الكاش
-        if (CACHE_CONFIG.last.enabled) {
-            const cacheResult = getFromCache(cacheKey);
-            if (cacheResult.hit) {
-                console.log(`🚀 [CACHE] استرجاع بيانات المسار المشترك من الكاش: ${id_live}`);
-                return res.json(cacheResult.data);
-            }
+        // 🆕 التحقق من الكاش
+        if (appCache.has(cacheKey)) {
+            return res.json(appCache.get(cacheKey));
         }
 
         console.log(`🚀 بدء معالجة المسار المشترك لقناة: ${id_live}`);
@@ -1169,18 +799,14 @@ app.get("/last/:id_live", async (req, res) => {
             "device_api": "28", "version_name": "187", "language": "ar",
             "timezone": "Europe/Istanbul", "device_type": "phone",
             "KEY_ACTIVATED_TYPE": "232425", "store": "direct",
-            "isStoreVersion": false, "isPremium": false, "isCoupon_active": false, "hideAds": false,
-            "appCount": "{\"adsFailed\":73,\"adsLoaded\":56,\"adsShowed\":17,\"runCount\":8}",
             "mainServer": "http://main.eastgoessouth.online/api/live/livedrama/v13.0.0/",
             "type": "tv", "id_live": id_live, "id": id_live, "live_id": id_live, "channel_id": id_live
         };
         
         const encryptedStreamBody = encryptAES(JSON.stringify(streamsPostData));
-        
         const streamRes = await axios.post("http://live.1spbgmu.com/api/live/livedrama/v13.0.0/getLiveAllStreamsById", encryptedStreamBody, {
             headers: { "Content-Type": "text/plain", "User-Agent": "Dalvik/2.1.0 (Linux; U; Android 9; SM-S908E Build/TP1A.220624.014)", "Host": "live.1spbgmu.com", "Connection": "Keep-Alive" },
-            responseType: "arraybuffer",
-            timeout: 15000
+            responseType: "arraybuffer", timeout: 15000
         });
         
         const decryptedStreamRes = decryptAES(Buffer.from(streamRes.data).toString("utf-8"));
@@ -1188,25 +814,19 @@ app.get("/last/:id_live", async (req, res) => {
         const liveData = streamJson.live || {};
         const url = liveData.url;
 
-        if (!url || url === "empty") {
-            return res.status(404).json({ error: true, message: "لم يتم العثور على رابط أساسي لهذه القناة" });
-        }
+        if (!url || url === "empty") return res.status(404).json({ error: true, message: "لم يتم العثور على رابط أساسي لهذه القناة" });
 
         const redirectResult = await sendRequest(id_live, url, "redirect", "", "getLiveByRedirect");
         const redirectData = redirectResult.decrypted_response;
 
         let urlVal = "";
-        if (redirectData && redirectData.data && redirectData.data.url) {
-            urlVal = redirectData.data.url.trim();
-        }
-
-        let finalResult;
+        if (redirectData && redirectData.data && redirectData.data.url) urlVal = redirectData.data.url.trim();
 
         if (urlVal !== "1" && urlVal !== "" && urlVal !== "empty") {
-            finalResult = redirectData;
+            appCache.set(cacheKey, redirectData); // 🆕 حفظ في الكاش
+            return res.json(redirectData);
         } else {
             console.log(`⚠️ الرد التوجيهي كان ("1")، سيتم تشغيل وظيفة الـ stream الأساسية لقناة: ${id_live}`);
-            
             let parsedStreams = [];
             const mainUrl = liveData.url || "";
             const mainAgent = liveData.agent || "";
@@ -1222,71 +842,49 @@ app.get("/last/:id_live", async (req, res) => {
                 for (let i = 0; i < backupParts.length; i++) {
                     const part = backupParts[i].trim();
                     if (!part) continue;
-                    
                     const subParts = part.split("--");
                     const linkData = subParts[0] ? subParts[0].trim() : "";
                     const agentData = subParts[1] ? subParts[1].trim() : "";
-                    
                     if (!linkData || linkData === "empty") continue;
                     const server = await processServer(id_live, `سيرفر ${parsedStreams.length + 1}`, linkData, agentData);
                     parsedStreams.push(server);
                 }
             }
 
-            finalResult = {
+            const finalResponse = {
                 id_live: liveData.id_live || id_live,
                 name: liveData.name || "",
                 img_url: liveData.img_url || "",
                 streams: parsedStreams
             };
+
+            appCache.set(cacheKey, finalResponse); // 🆕 حفظ في الكاش
+            return res.json(finalResponse);
         }
 
-        // حفظ في الكاش
-        if (CACHE_CONFIG.last.enabled) {
-            setToCache(cacheKey, finalResult, CACHE_CONFIG.last.ttl);
-        }
-
-        res.json(finalResult);
-
-    } catch (error) {
-        res.status(500).json({ error: true, message: error.message });
-    }
+    } catch (error) { res.status(500).json({ error: true, message: error.message }); }
 });
 
 // ==========================================
-// 4. مسار جلب المباريات (مع الكاش)
+// 4. مسار جلب المباريات (مع الكاش 5 دقائق)
 // ==========================================
 app.get("/mach", async (req, res) => {
     try {
-        // إنشاء مفتاح كاش
-        const cacheKey = "matches:all";
+        const cacheKey = `matches_data`;
         
-        // محاولة جلب من الكاش
-        if (CACHE_CONFIG.matches.enabled) {
-            const cacheResult = getFromCache(cacheKey);
-            if (cacheResult.hit) {
-                console.log(`⚽ [CACHE] استرجاع بيانات المباريات من الكاش`);
-                return res.json(cacheResult.data);
-            }
+        // 🆕 التحقق من الكاش
+        if (appCache.has(cacheKey)) {
+            return res.json(appCache.get(cacheKey));
         }
-        
+
         console.log(`⚽ جلب بيانات المباريات...`);
 
         const postData = {
             "user_id": "_82668_1785761367217_notloggedin.com_dramalive3",
             "device_id": "e603540e-ed93-47a3-bec6-a15f7f056604",
-            "device_api": "28",
-            "version_name": "187",
-            "language": "ar",
-            "timezone": "Europe/Istanbul",
-            "device_type": "phone",
-            "KEY_ACTIVATED_TYPE": "232425",
-            "store": "direct",
-            "isStoreVersion": false,
-            "isPremium": false,
-            "isCoupon_active": false,
-            "hideAds": false,
-            "appCount": "{\"adsFailed\":73,\"adsLoaded\":56,\"adsShowed\":17,\"runCount\":8}",
+            "device_api": "28", "version_name": "187", "language": "ar",
+            "timezone": "Europe/Istanbul", "device_type": "phone",
+            "KEY_ACTIVATED_TYPE": "232425", "store": "direct",
             "mainServer": "http://main.eastgoessouth.online/api/live/livedrama/v13.0.0/",
             "type": "tv"
         };
@@ -1294,14 +892,8 @@ app.get("/mach", async (req, res) => {
         const encryptedBody = encryptAES(JSON.stringify(postData));
 
         const response = await axios.post("http://sport.1spbgmu.com/sport/getMatches", encryptedBody, {
-            headers: { 
-                "Content-Type": "text/plain", 
-                "User-Agent": "Dalvik/2.1.0 (Linux; U; Android 9; SM-S908E Build/TP1A.220624.014)", 
-                "Host": "sport.1spbgmu.com", 
-                "Connection": "Keep-Alive" 
-            },
-            timeout: 30000,
-            responseType: "arraybuffer"
+            headers: { "Content-Type": "text/plain", "User-Agent": "Dalvik/2.1.0 (Linux; U; Android 9; SM-S908E Build/TP1A.220624.014)", "Host": "sport.1spbgmu.com", "Connection": "Keep-Alive" },
+            timeout: 30000, responseType: "arraybuffer"
         });
 
         const encryptedResponse = Buffer.from(response.data).toString("utf-8");
@@ -1345,33 +937,24 @@ app.get("/mach", async (req, res) => {
             };
         });
 
-        // حفظ في الكاش
-        if (CACHE_CONFIG.matches.enabled) {
-            setToCache(cacheKey, formattedMatches, CACHE_CONFIG.matches.ttl);
-        }
-        
+        // 🆕 حفظ في الكاش لمدة 5 دقائق لتخفيف الضغط
+        appCache.set(cacheKey, formattedMatches);
         res.json(formattedMatches);
 
-    } catch (error) { 
-        console.error('Error fetching matches:', error.message);
-        res.status(500).json({ error: true, message: error.message }); 
-    }
+    } catch (error) { res.status(500).json({ error: true, message: error.message }); }
 });
 
 // ==========================================
-// 3. /resolve و /extract (مع الكاش)
+// مسارات مساعدة وقائمة الأقسام
 // ==========================================
 app.all("/resolve", async (req, res) => {
     try {
         const targetUrl = req.query.url || req.body.url;
         const channelId = req.query.id_live || req.body.id_live || "test";
         if (!targetUrl) return res.status(400).json({ error: true, message: "يرجى إرسال الرابط (url)" });
-        
         const result = await resolveRedirectUrl(channelId, targetUrl);
         res.json(result ? { success: true, ...result } : { error: true, message: "فشل" });
-    } catch (error) { 
-        res.status(500).json({ error: true, message: error.message }); 
-    }
+    } catch (error) { res.status(500).json({ error: true, message: error.message }); }
 });
 
 app.get("/extract", async (req, res) => {
@@ -1379,126 +962,56 @@ app.get("/extract", async (req, res) => {
         const targetUrl = req.query.url;
         const channelId = req.query.id_live || "test";
         if (!targetUrl) return res.status(400).json({ error: true, message: "يرجى إرسال الرابط (url)" });
-        
         const result = await resolveRedirectUrl(channelId, targetUrl);
         res.json({ success: result ? true : false, result: result });
-    } catch (error) { 
-        res.status(500).json({ error: true, message: error.message }); 
-    }
+    } catch (error) { res.status(500).json({ error: true, message: error.message }); }
 });
 
-// ==========================================
-// قائمة الأقسام (Topics) - مع الكاش
-// ==========================================
 const allTopics = [
-    // ... (نفس القائمة السابقة)
+    {"id_topic":"hot_now","name_topic":"الأكثر مشاهدة","img_url_topic":"http://logo.twoapistack.work/img/topics/hot_now.png","code":""},
+    {"id_topic":"alwan","name_topic":"الوان","img_url_topic":"http://logo.twoapistack.work/img/topics/alwan.jpg","code":""},
+    {"id_topic":"shahid","name_topic":"شاهد","img_url_topic":"http://logo.twoapistack.work/img/topics/shahid.jpg","code":""},
+    {"id_topic":"arabic_sport","name_topic":"رياضة","img_url_topic":"http://logo.twoapistack.work/img/topics/ic_basketball_red.png","code":""},
+    {"id_topic":"ar_1","name_topic":"ترفيه عربي","img_url_topic":"http://logo.twoapistack.work/img/topics/ic_featured_ar.png","code":""},
+    {"id_topic":"ar_2","name_topic":"أخبار","img_url_topic":"http://logo.twoapistack.work/img/topics/ic_newspaper.png","code":""},
+    {"id_topic":"ar_3","name_topic":"أطفال","img_url_topic":"http://logo.twoapistack.work/img/topics/ic_kids.jpg","code":""},
+    {"id_topic":"ar_5","name_topic":"وثائقي","img_url_topic":"http://logo.twoapistack.work/img/topics/ic_documantry.png","code":""},
+    {"id_topic":"ar_6","name_topic":"ديني","img_url_topic":"http://logo.twoapistack.work/img/topics/ic__mosque.png","code":""},
+    {"id_topic":"ar_7","name_topic":"أفلام","img_url_topic":"http://logo.twoapistack.work/img/topics/ic_film.png","code":""},
+    {"id_topic":"ar_8","name_topic":"موسيقى","img_url_topic":"http://logo.twoapistack.work/img/topics/ic_music.jpg","code":""},
+    {"id_topic":"art","name_topic":"ART","img_url_topic":"http://logo.twoapistack.work/img/topics/art.png","code":""},
+    {"id_topic":"osn","name_topic":"OSN","img_url_topic":"http://logo.twoapistack.work/img/topics/osn_logo.png","code":""},
+    {"id_topic":"netflix","name_topic":"NETFLIX","img_url_topic":"http://logo.twoapistack.work/img/topics/netflix.jpg","code":""},
+    {"id_topic":"mbc","name_topic":"MBC","img_url_topic":"http://logo.twoapistack.work/img/topics/mpc.jpg","code":""},
+    {"id_topic":"rotana","name_topic":"روتانا","img_url_topic":"http://logo.twoapistack.work/img/topics/rotana.jpg","code":""},
+    {"id_topic":"cook","name_topic":"الطبخ","img_url_topic":"http://logo.twoapistack.work/img/topics/ic_chef.png","code":""},
+    {"id_topic":"weyyak","name_topic":"وياك","img_url_topic":"http://logo.twoapistack.work/img/topics/weyyak.jpg","code":""},
+    {"id_topic":"bein_entir","name_topic":"بي ان ترفيه","img_url_topic":"http://logo.twoapistack.work/img/topics/bein_enter.jpg","code":""},
+    {"id_topic":"bein_sport","name_topic":"بي ان سبورت","img_url_topic":"http://logo.twoapistack.work/img/topics/bein_sport.png","code":""},
+    {"id_topic":"science","name_topic":"علوم","img_url_topic":"http://logo.twoapistack.work/img/topics/science.png","code":""},
+    {"id_topic":"anime","name_topic":"انيمي","img_url_topic":"http://logo.twoapistack.work/img/topics/anime.jpg","code":""},
+    {"id_topic":"roya","name_topic":"رؤيا","img_url_topic":"https://backend.roya-tv.com/imagechanger/Size01Q40R11/images/channels/iMoPuU3u5qnqMsL.png","code":""},
+    {"id_topic":"963","name_topic":"سوريا","img_url_topic":"http://logo.twoapistack.work/img/topics/ic_flag_sy.png","code":"sy"},
+    {"id_topic":"961","name_topic":"لبنان","img_url_topic":"http://logo.twoapistack.work/img/topics/ic_flag_lb.png","code":"lb"},
+    {"id_topic":"966","name_topic":"السعودية","img_url_topic":"http://logo.twoapistack.work/img/topics/ic_flag_sa.png","code":"sa"},
+    {"id_topic":"20","name_topic":"مصر","img_url_topic":"http://logo.twoapistack.work/img/topics/ic_flag_eg.png","code":"eg"},
+    {"id_topic":"971","name_topic":"الإمارات العربية المتحدة","img_url_topic":"http://logo.twoapistack.work/img/topics/ic_flag_ae.png","code":"ae"},
+    {"id_topic":"962","name_topic":"الأردن","img_url_topic":"http://logo.twoapistack.work/img/topics/ic_flag_jo.png","code":"jo"},
+    {"id_topic":"974","name_topic":"قطر","img_url_topic":"http://logo.twoapistack.work/img/topics/ic_flag_qa.png","code":"qa"},
+    {"id_topic":"964","name_topic":"العراق","img_url_topic":"http://logo.twoapistack.work/img/topics/ic_flag_iq.png","code":"iq"},
+    {"id_topic":"965","name_topic":"الكويت","img_url_topic":"http://logo.twoapistack.work/img/topics/ic_flag_kw.png","code":"kw"},
+    {"id_topic":"968","name_topic":"عُمان","img_url_topic":"http://logo.twoapistack.work/img/topics/ic_flag_om.png","code":"om"},
+    {"id_topic":"967","name_topic":"اليمن","img_url_topic":"http://logo.twoapistack.work/img/topics/ic_flag_ye.png","code":"ye"},
+    {"id_topic":"973","name_topic":"البحرين","img_url_topic":"http://logo.twoapistack.work/img/topics/ic_flag_bh.png","code":"bh"},
+    {"id_topic":"970","name_topic":"فلسطين","img_url_topic":"http://logo.twoapistack.work/img/topics/ic_flag_ps.png","code":"ps"},
+    {"id_topic":"249","name_topic":"السودان","img_url_topic":"http://logo.twoapistack.work/img/topics/ic_flag_sd.png","code":""},
+    {"id_topic":"216","name_topic":"تونس","img_url_topic":"http://logo.twoapistack.work/img/topics/ic_flag_tn.png","code":""},
+    {"id_topic":"212","name_topic":"المغرب","img_url_topic":"http://logo.twoapistack.work/img/topics/ic_flag_ma.png","code":""},
+    {"id_topic":"213","name_topic":"الجزائر","img_url_topic":"http://logo.twoapistack.work/img/topics/ic_flag_dz.png","code":""},
+    {"id_topic":"218","name_topic":"ليبيا","img_url_topic":"http://logo.twoapistack.work/img/topics/ic_flag_ly.png","code":""},
+    {"id_topic":"252","name_topic":"الصومال","img_url_topic":"http://logo.twoapistack.work/img/topics/ic_flag_so.png","code":""}
 ];
 
-app.get("/get-all-topics", (req, res) => { 
-    // محاولة جلب من الكاش
-    const cacheKey = "topics:all";
-    
-    if (CACHE_CONFIG.topics.enabled) {
-        const cacheResult = getFromCache(cacheKey);
-        if (cacheResult.hit) {
-            return res.json(cacheResult.data);
-        }
-    }
-    
-    // حفظ في الكاش
-    if (CACHE_CONFIG.topics.enabled) {
-        setToCache(cacheKey, allTopics, CACHE_CONFIG.topics.ttl);
-    }
-    
-    res.json(allTopics); 
-});
+app.get("/get-all-topics", (req, res) => { res.json(allTopics); });
 
-// ==========================================
-// مسارات إدارة الكاش
-// ==========================================
-
-// الحصول على إحصائيات الكاش
-app.get("/cache/stats", (req, res) => {
-    const stats = getCacheStats();
-    res.json(stats);
-});
-
-// مسح الكاش بالكامل
-app.delete("/cache/clear", (req, res) => {
-    const cleared = clearAllCache();
-    res.json({ success: cleared, message: cleared ? "تم مسح الكاش بالكامل" : "فشل في مسح الكاش" });
-});
-
-// مسح كاش محدد حسب النوع
-app.delete("/cache/clear/:type", (req, res) => {
-    const type = req.params.type;
-    let prefix = "";
-    
-    switch(type) {
-        case 'channels':
-            prefix = 'channels:';
-            break;
-        case 'streams':
-            prefix = 'stream:';
-            break;
-        case 'matches':
-            prefix = 'matches:';
-            break;
-        case 'redirect':
-            prefix = 'redirect:';
-            break;
-        case 'resolve':
-            prefix = 'resolve:';
-            break;
-        case 'topics':
-            prefix = 'topics:';
-            break;
-        case 'live_id':
-            prefix = 'live_id:';
-            break;
-        case 'last':
-            prefix = 'last:';
-            break;
-        default:
-            return res.status(400).json({ error: true, message: "نوع كاش غير معروف" });
-    }
-    
-    const count = clearCacheByPrefix(prefix);
-    res.json({ success: count > 0, cleared: count, message: `تم مسح ${count} عنصر من الكاش` });
-});
-
-// حذف كاش محدد (مثلاً: قناة معينة)
-app.delete("/cache/channel/:id", (req, res) => {
-    const id = req.params.id;
-    let deleted = 0;
-    
-    deleted += deleteFromCache(`stream:${id}`);
-    deleted += deleteFromCache(`redirect-data:${id}`);
-    deleted += deleteFromCache(`live_id:${id}`);
-    deleted += deleteFromCache(`last:${id}`);
-    deleted += deleteFromCache(`resolve:${id}`);
-    
-    res.json({ success: deleted > 0, deleted: deleted, message: `تم حذف ${deleted} عنصر من الكاش للقناة ${id}` });
-});
-
-// تحديث مدة صلاحية الكاش
-app.post("/cache/ttl", (req, res) => {
-    const { type, ttl } = req.body;
-    
-    if (!type || !ttl) {
-        return res.status(400).json({ error: true, message: "يرجى إرسال type و ttl" });
-    }
-    
-    if (CACHE_CONFIG[type]) {
-        CACHE_CONFIG[type].ttl = parseInt(ttl);
-        res.json({ success: true, message: `تم تحديث TTL لـ ${type} إلى ${ttl} ثانية` });
-    } else {
-        res.status(400).json({ error: true, message: "نوع كاش غير معروف" });
-    }
-});
-
-app.listen(PORT, () => { 
-    console.log("🚀 Server running on port " + PORT); 
-    console.log(`📦 نظام الكاش مفعل - الحد الأقصى: 1000 عنصر`);
-    console.log(`⏱️ إعدادات الكاش:`, CACHE_CONFIG);
-});
+app.listen(PORT, () => { console.log("🚀 Server running on port " + PORT); });
