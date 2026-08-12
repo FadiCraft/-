@@ -508,7 +508,7 @@ app.get("/channels", async (req, res) => {
 
 
 // ==========================================
-// مسار /stream (مبسط: يطلب، يفك التشفير، ويعرض الرد الأصلي فقط)
+// مسار /stream (يعرض الرد الأصلي، أو يفك تشفير سيرفر محدد إذا تم طلب &s1, &s2 الخ)
 // ==========================================
 app.get("/stream", async (req, res) => {
     try {
@@ -517,7 +517,17 @@ app.get("/stream", async (req, res) => {
             return res.status(400).json({ error: true, message: "يرجى إرسال id_live" });
         }
 
-        console.log(`📺 جلب الرد الأصلي للقناة: ${id_live}`);
+        // 1. البحث عن بارامتر السيرفر (مثل s1, s2, s3) في الطلب
+        let requestedServerIndex = -1;
+        for (const key in req.query) {
+            if (key.match(/^s\d+$/)) {
+                // s1 تعني العنصر رقم 0 (لأن المصفوفة تبدأ من 0)
+                requestedServerIndex = parseInt(key.substring(1)) - 1; 
+                break;
+            }
+        }
+
+        console.log(`📺 جلب القناة: ${id_live} ${requestedServerIndex !== -1 ? `(طلب سيرفر محدد: s${requestedServerIndex + 1})` : '(جلب الرد الأصلي بالكامل)'}`);
 
         const postData = {
             "user_id": "_82668_1785761367217_notloggedin.com_dramalive3",
@@ -531,10 +541,8 @@ app.get("/stream", async (req, res) => {
             "type": "tv", "id_live": id_live, "id": id_live, "live_id": id_live, "channel_id": id_live
         };
 
-        // 1. تشفير الطلب
         const encryptedBody = encryptAES(JSON.stringify(postData));
         
-        // 2. إرسال الطلب للسيرفر الأساسي
         const response = await axios.post("http://live.1spbgmu.com/api/live/livedrama/v13.0.0/getLiveAllStreamsById", encryptedBody, {
             headers: { 
                 "Content-Type": "text/plain", 
@@ -543,21 +551,84 @@ app.get("/stream", async (req, res) => {
                 "Connection": "Keep-Alive" 
             },
             timeout: 15000, 
-            responseType: "arraybuffer" // مهم لاستقبال البيانات كـ Buffer قبل فك التشفير
+            responseType: "arraybuffer" 
         });
 
-        // 3. فك تشفير الرد
         const encryptedResponse = Buffer.from(response.data).toString("utf-8");
         const decryptedResponse = decryptAES(encryptedResponse);
         const jsonResponse = JSON.parse(decryptedResponse);
 
-        // 4. عرض الـ JSON الأصلي كما هو
-        res.json(jsonResponse);
+        // 2. إذا لم يتم طلب سيرفر محدد في الرابط (يعني الرابط كان بدون &s1)، نعرض الرد الأصلي كاملاً وننهي العملية
+        if (requestedServerIndex === -1) {
+            return res.json(jsonResponse);
+        }
+
+        // 3. --- هنا تبدأ معالجة السيرفر المحدد ---
+        // بناء قائمة السيرفرات داخلياً في الذاكرة لكي نختار السيرفر المطلوب
+        const liveData = jsonResponse.live || {};
+        let allStreams = [];
+
+        if (liveData.url && liveData.url !== "empty") {
+            allStreams.push({ url: liveData.url, agent: liveData.agent || "" });
+        }
+
+        if (liveData.backup) {
+            const backupParts = liveData.backup.split("-;-");
+            for (const part of backupParts) {
+                const trimmedPart = part.trim();
+                if (!trimmedPart) continue;
+                
+                const subParts = trimmedPart.split("--");
+                const linkData = subParts[0] ? subParts[0].trim() : "";
+                const agentData = subParts[1] ? subParts[1].trim() : "";
+                
+                if (linkData && linkData !== "empty") {
+                    allStreams.push({ url: linkData, agent: agentData });
+                }
+            }
+        }
+
+        // التأكد من أن السيرفر المطلوب मौजूद ضمن الروابط (لتفادي الأخطاء إذا طلب المستخدم &s10 وكان هناك 5 سيرفرات فقط)
+        if (requestedServerIndex >= allStreams.length) {
+            return res.status(404).json({ 
+                error: true, 
+                message: `السيرفر s${requestedServerIndex + 1} غير متوفر. عدد السيرفرات المتاحة هو ${allStreams.length}` 
+            });
+        }
+
+        const targetStream = allStreams[requestedServerIndex];
+
+        // 4. إرسال الطلب للسيرفر المحدد وفك تشفيره
+        if (targetStream.agent === "redirect") {
+            try {
+                let urlToSend = targetStream.url;
+                if (urlToSend.includes(".LS.V2") && urlToSend.endsWith("/s")) {
+                    urlToSend = convertFakeUrlToRealUrl(urlToSend, id_live);
+                }
+                
+                // استخدام دالة sendRequest لإرسال الطلب للرابط المطلوب وفك تشفيره
+                const redirectResult = await sendRequest(id_live, urlToSend, "redirect", "", "getLiveByRedirect");
+                
+                // إرجاع الرد الأصلي المفكوك للسيرفر فقط كما طلبت
+                return res.json(redirectResult.decrypted_response);
+            } catch (err) {
+                return res.status(500).json({ 
+                    error: true, 
+                    message: `فشل في فك redirect للسيرفر s${requestedServerIndex + 1}`, 
+                    details: err.message 
+                });
+            }
+        } 
+
+        // إذا كان السيرفر مباشر ولا يحتاج فك redirect، نقوم بعرض بياناته كما هي
+        return res.json({
+            message: `السيرفر s${requestedServerIndex + 1} ليس من نوع redirect`,
+            stream_data: targetStream
+        });
 
     } catch (error) { 
-        // رسالة الخطأ المحدثة لمعرفة مصدر الـ Not Found
         const status = error.response ? error.response.status : null;
-        console.error(`❌ خطأ في جلب السيرفرات: ${status || error.message}`);
+        console.error(`❌ خطأ في مسار /stream: ${status || error.message}`);
         
         res.status(500).json({ 
             error: true, 
