@@ -816,7 +816,7 @@ app.get("/get-redirect-data", async (req, res) => {
 
 
 // ==========================================
-// 🆕 المسار الذكي المدمج (عن طريق استدعاء المسارات الداخلية)
+// 🆕 المسار الذكي المدمج (المحسن مع فحص الروابط الفارغة)
 // ==========================================
 app.get("/live_id/:id", async (req, res) => {
     try {
@@ -828,7 +828,6 @@ app.get("/live_id/:id", async (req, res) => {
 
         console.log(`🤖 [المسار الذكي] جاري فحص القناة: ${id_live}`);
 
-        // رابط السيرفر المحلي الخاص بك
         const localBaseUrl = `http://localhost:${PORT}`;
 
         // 1. المحاولة الأولى: استدعاء مسار /get-redirect-data الداخلي
@@ -846,13 +845,35 @@ app.get("/live_id/:id", async (req, res) => {
             console.log(`⚠️ فشل أو خطأ في مسار Redirect، سيتم الانتقال لمسار Stream...`);
         }
 
-        // 2. المحاولة الثانية (البديل): استدعاء مسار /stream الداخلي
+        // 2. المحاولة الثانية: استدعاء مسار /stream الداخلي
         console.log(`🔄 [المسار الذكي] النتيجة غير صالحة (1)، جاري استدعاء مسار السيرفرات الكاملة...`);
+        const streamResponse = await axios.get(`${localBaseUrl}/stream?id_live=${id_live}`);
+        const streamData = streamResponse.data;
+
+        // 🎯 3. الفحص الذكي: هل الروابط داخل السيرفرات فارغة تماماً؟
+        let hasValidStreams = false;
+        if (streamData && Array.isArray(streamData.streams)) {
+            hasValidStreams = streamData.streams.some(server => server.url && server.url.trim() !== "");
+        }
+
+        // إذا كانت الروابط موجودة وصالحة، نرجها كما هي
+        if (hasValidStreams) {
+            console.log(`✅ [المسار الذكي] تم العثور على سيرفرات تعمل للقناة ${id_live}`);
+            return res.json(streamData);
+        }
+
+        // 4. الخطة البديلة النهائية: إذا كانت كل الروابط فارغة، استدعاء مسار /last/
+        console.log(`⚠️ تحذير: جميع السيرفرات فارغة! جاري التحويل إلى مسار البديل /last/ لقناة: ${id_live}`);
         
-        const streamResponse = await axios.get(`${localBaseUrl}/live_id2/${id_live}`);
-        
-        // إرجاع نتيجة مسار السيرفرات كما هي
-        return res.json(streamResponse.data);
+        try {
+            // استبدل هذا الرابط بالمسار الفعلي لـ /last/ لديك (سواء داخلي أو دالة برمجية)
+            const lastResponse = await axios.get(`${localBaseUrl}/last?id_live=${id_live}`);
+            return res.json(lastResponse.data);
+        } catch (lastErr) {
+            // إذا فشل مسار /last أو لم يكن موجوداً، نرجع هيكل الـ streams الفارغ كخطة أخيرة
+            console.log(`❌ فشل مسار /last: ${lastErr.message}`);
+            return res.json(streamData);
+        }
 
     } catch (error) {
         res.status(500).json({ error: true, message: "حدث خطأ أثناء معالجة المسار الذكي: " + error.message });
@@ -866,11 +887,10 @@ app.get("/live_id/:id", async (req, res) => {
 
 
 
-
 // ==========================================
 // مسار مشترك: جلب بيانات الـ Redirect وإذا فشلت (url="1") ينتقل لجلب الـ Stream
 // ==========================================
-app.get("/live_id2/:id_live", async (req, res) => {
+app.get("/last/:id_live", async (req, res) => {
     try {
         const id_live = req.params.id_live;
         
