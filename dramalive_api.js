@@ -861,21 +861,65 @@ app.get("/live_id/:id_live", async (req, res) => {
         }
 
         // 2. إرسال الطلب للحصول على بيانات getLiveByRedirect أولاً
-        const redirectResult = await sendRequest(id_live, url, "redirect", "", "getLiveByRedirect");
-        const redirectData = redirectResult.decrypted_response;
+        let redirectResult = await sendRequest(id_live, url, "redirect", "", "getLiveByRedirect");
+        let redirectData = redirectResult.decrypted_response;
+        let returnedUrl = redirectData?.data?.url || "";
 
-        let urlVal = "";
-        if (redirectData && redirectData.data && redirectData.data.url) {
-            urlVal = redirectData.data.url.trim();
+        // 🎯 الفحص الذكي المطور (مع استخراج التوكن) المضاف من /get-redirect-data
+        let isDirectStream = false;
+        let actualUrlObj = {};
+        let actualUrl = returnedUrl;
+        let actualHeaders = {};
+
+        try {
+            actualUrlObj = JSON.parse(returnedUrl);
+            actualUrl = actualUrlObj.url || returnedUrl;
+            actualHeaders = actualUrlObj.headers || {};
+        } catch(e) {}
+
+        const isGateway = actualUrl.includes("token.") || actualUrl.includes("?url=") || actualUrl.includes(".LS.V2");
+        const hasStreamExt = actualUrl.includes(".m3u8") || actualUrl.includes(".mpd");
+
+        if (hasStreamExt && !isGateway && returnedUrl !== "1") {
+            isDirectStream = true;
         }
 
-        // 3. التحقق من الرد: هل هو التفصيلي أم القيمة "1"؟
-        if (urlVal !== "1" && urlVal !== "" && urlVal !== "empty") {
+        if (!isDirectStream && returnedUrl !== "1") {
+            console.log(`🔄 [live_id] الرابط غير مباشر، جاري تجهيز الخطوة الوسيطة...`);
+            let rawData = "";
+
+            if (actualUrl.includes("token.easybroadcast.io")) {
+                try {
+                    console.log(`🔑 جاري استخراج التوكن من سيرفر EasyBroadcast...`);
+                    const tokenRes = await axios.get(actualUrl, { headers: actualHeaders });
+                    
+                    if (tokenRes.data && typeof tokenRes.data === 'object') {
+                        rawData = Object.keys(tokenRes.data)
+                            .map(key => `${encodeURIComponent(key)}=${encodeURIComponent(tokenRes.data[key])}`)
+                            .join('&');
+                    } else if (typeof tokenRes.data === 'string') {
+                        rawData = tokenRes.data;
+                    }
+                } catch (err) {
+                    console.log(`⚠️ فشل جلب التوكن: ${err.message}`);
+                }
+            } else if (redirectResult.encrypted_response) {
+                rawData = redirectResult.encrypted_response.trim();
+            }
+
+            const nextAgent = "double_redirect";
+            redirectResult = await sendRequest(id_live, returnedUrl, nextAgent, rawData, "getLiveByDoubleRedirect");
+            redirectData = redirectResult.decrypted_response;
+            returnedUrl = redirectData?.data?.url || ""; // تحديث الرابط بعد الطلب الثاني
+        }
+
+        // 3. التحقق من الرد النهائي: هل هو التفصيلي أم القيمة "1"؟
+        if (returnedUrl !== "1" && returnedUrl !== "" && returnedUrl !== "empty") {
             // ✅ الرد يحتوي على الداتا الكاملة، نرجعها مباشرة للعميل
             return res.json(redirectData);
         } else {
             // ⚠️ الرد كان "1"، سننتقل لتنفيذ عملية /stream
-            console.log(`⚠️ الرد التوجيهي كان ("1")، سيتم تشغيل وظيفة الـ stream الأساسية لقناة: ${id_live}`);
+            console.log(`⚠️ الرد التوجيهي النهائي كان ("1")، سيتم تشغيل وظيفة الـ stream الأساسية لقناة: ${id_live}`);
             
             let parsedStreams = [];
             const mainUrl = liveData.url || "";
@@ -916,6 +960,12 @@ app.get("/live_id/:id_live", async (req, res) => {
         res.status(500).json({ error: true, message: error.message });
     }
 });
+
+
+
+
+
+
 
 
 
