@@ -615,12 +615,8 @@ app.get("/stream", async (req, res) => {
 
 
 
-
-
-
-
 // ==========================================
-// 1. مسار POST: استخراج رد مفكوك التشفير (مع دعم Double Redirect الذكي)
+// 1. مسار POST: استخراج رد مفكوك التشفير (مع جلب التوكن الذكي)
 // ==========================================
 app.post("/get-redirect-data", async (req, res) => {
     try {
@@ -644,7 +640,6 @@ app.post("/get-redirect-data", async (req, res) => {
             };
             
             const encryptedStreamBody = encryptAES(JSON.stringify(streamsPostData));
-            
             const streamRes = await axios.post("http://live.1spbgmu.com/api/live/livedrama/v13.0.0/getLiveAllStreamsById", encryptedStreamBody, {
                 headers: { "Content-Type": "text/plain", "User-Agent": "Dalvik/2.1.0 (Linux; U; Android 9; SM-S908E Build/TP1A.220624.014)", "Host": "live.1spbgmu.com", "Connection": "Keep-Alive" },
                 responseType: "arraybuffer",
@@ -665,12 +660,16 @@ app.post("/get-redirect-data", async (req, res) => {
         let responseData = result.decrypted_response;
         let returnedUrl = responseData?.data?.url || "";
 
-        // 🎯 الفحص الذكي المطور
+        // 🎯 الفحص الذكي المطور (مع استخراج التوكن)
         let isDirectStream = false;
+        let actualUrlObj = {};
         let actualUrl = returnedUrl;
+        let actualHeaders = {};
+
         try {
-            const parsedUrlObj = JSON.parse(returnedUrl);
-            actualUrl = parsedUrlObj.url || returnedUrl;
+            actualUrlObj = JSON.parse(returnedUrl);
+            actualUrl = actualUrlObj.url || returnedUrl;
+            actualHeaders = actualUrlObj.headers || {};
         } catch(e) {}
 
         const isGateway = actualUrl.includes("token.") || actualUrl.includes("?url=") || actualUrl.includes(".LS.V2");
@@ -680,11 +679,31 @@ app.post("/get-redirect-data", async (req, res) => {
             isDirectStream = true;
         }
 
-        if (!isDirectStream && result.encrypted_response && returnedUrl !== "1") {
-            console.log(`🔄 [POST] الرابط غير مباشر (بوابة/توكن)، جاري تنفيذ Double Redirect...`);
-            const encryptedRawData = result.encrypted_response.trim();
-            const nextAgent = "double_redirect"; // إجبار السيرفر على قبول الداتا المشفرة
-            result = await sendRequest(id_live, returnedUrl, nextAgent, encryptedRawData, "getLiveByDoubleRedirect");
+        if (!isDirectStream && returnedUrl !== "1") {
+            console.log(`🔄 [POST] الرابط غير مباشر، جاري تجهيز الخطوة الوسيطة...`);
+            let rawData = "";
+
+            if (actualUrl.includes("token.easybroadcast.io")) {
+                try {
+                    console.log(`🔑 جاري استخراج التوكن من سيرفر EasyBroadcast...`);
+                    const tokenRes = await axios.get(actualUrl, { headers: actualHeaders });
+                    
+                    if (tokenRes.data && typeof tokenRes.data === 'object') {
+                        rawData = Object.keys(tokenRes.data)
+                            .map(key => `${encodeURIComponent(key)}=${encodeURIComponent(tokenRes.data[key])}`)
+                            .join('&');
+                    } else if (typeof tokenRes.data === 'string') {
+                        rawData = tokenRes.data;
+                    }
+                } catch (err) {
+                    console.log(`⚠️ فشل جلب التوكن: ${err.message}`);
+                }
+            } else if (result.encrypted_response) {
+                rawData = result.encrypted_response.trim();
+            }
+
+            const nextAgent = "double_redirect";
+            result = await sendRequest(id_live, returnedUrl, nextAgent, rawData, "getLiveByDoubleRedirect");
         }
 
         res.json(result.decrypted_response);
@@ -696,7 +715,7 @@ app.post("/get-redirect-data", async (req, res) => {
 
 
 // ==========================================
-// 2. مسار GET: جلب الرد مفكوك التشفير (مع دعم Double Redirect الذكي)
+// 2. مسار GET: جلب الرد مفكوك التشفير (مع جلب التوكن الذكي)
 // ==========================================
 app.get("/get-redirect-data", async (req, res) => {
     try {
@@ -719,7 +738,6 @@ app.get("/get-redirect-data", async (req, res) => {
         };
         
         const encryptedStreamBody = encryptAES(JSON.stringify(streamsPostData));
-        
         const streamRes = await axios.post("http://live.1spbgmu.com/api/live/livedrama/v13.0.0/getLiveAllStreamsById", encryptedStreamBody, {
             headers: { "Content-Type": "text/plain", "User-Agent": "Dalvik/2.1.0 (Linux; U; Android 9; SM-S908E Build/TP1A.220624.014)", "Host": "live.1spbgmu.com", "Connection": "Keep-Alive" },
             responseType: "arraybuffer",
@@ -739,12 +757,16 @@ app.get("/get-redirect-data", async (req, res) => {
         let responseData = result.decrypted_response;
         let returnedUrl = responseData?.data?.url || "";
 
-        // 🎯 الفحص الذكي المطور
+        // 🎯 الفحص الذكي المطور (مع استخراج التوكن)
         let isDirectStream = false;
+        let actualUrlObj = {};
         let actualUrl = returnedUrl;
+        let actualHeaders = {};
+
         try {
-            const parsedUrlObj = JSON.parse(returnedUrl);
-            actualUrl = parsedUrlObj.url || returnedUrl;
+            actualUrlObj = JSON.parse(returnedUrl);
+            actualUrl = actualUrlObj.url || returnedUrl;
+            actualHeaders = actualUrlObj.headers || {};
         } catch(e) {}
 
         const isGateway = actualUrl.includes("token.") || actualUrl.includes("?url=") || actualUrl.includes(".LS.V2");
@@ -754,11 +776,31 @@ app.get("/get-redirect-data", async (req, res) => {
             isDirectStream = true;
         }
 
-        if (!isDirectStream && result.encrypted_response && returnedUrl !== "1") {
-            console.log(`🔄 [GET] الرابط غير مباشر (بوابة/توكن)، جاري تنفيذ Double Redirect...`);
-            const encryptedRawData = result.encrypted_response.trim();
-            const nextAgent = "double_redirect"; // إجبار السيرفر على قبول الداتا المشفرة
-            result = await sendRequest(id_live, returnedUrl, nextAgent, encryptedRawData, "getLiveByDoubleRedirect");
+        if (!isDirectStream && returnedUrl !== "1") {
+            console.log(`🔄 [GET] الرابط غير مباشر، جاري تجهيز الخطوة الوسيطة...`);
+            let rawData = "";
+
+            if (actualUrl.includes("token.easybroadcast.io")) {
+                try {
+                    console.log(`🔑 جاري استخراج التوكن من سيرفر EasyBroadcast...`);
+                    const tokenRes = await axios.get(actualUrl, { headers: actualHeaders });
+                    
+                    if (tokenRes.data && typeof tokenRes.data === 'object') {
+                        rawData = Object.keys(tokenRes.data)
+                            .map(key => `${encodeURIComponent(key)}=${encodeURIComponent(tokenRes.data[key])}`)
+                            .join('&');
+                    } else if (typeof tokenRes.data === 'string') {
+                        rawData = tokenRes.data;
+                    }
+                } catch (err) {
+                    console.log(`⚠️ فشل جلب التوكن: ${err.message}`);
+                }
+            } else if (result.encrypted_response) {
+                rawData = result.encrypted_response.trim();
+            }
+
+            const nextAgent = "double_redirect";
+            result = await sendRequest(id_live, returnedUrl, nextAgent, rawData, "getLiveByDoubleRedirect");
         }
 
         res.json(result.decrypted_response);
@@ -767,8 +809,6 @@ app.get("/get-redirect-data", async (req, res) => {
         res.status(500).json({ error: true, message: error.message });
     }
 });
-
-
 
 
 
