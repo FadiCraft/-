@@ -686,7 +686,7 @@ app.get("/get-redirect-data", async (req, res) => {
 });
 
 // ==========================================
-// 🆕 المسار الذكي المدمج 
+// 🆕 المسار الذكي المدمج (مع الكاش المباشر لتوفير استدعاء الروابط الداخلية)
 // ==========================================
 app.get("/live_id/:id", async (req, res) => {
     try {
@@ -694,53 +694,55 @@ app.get("/live_id/:id", async (req, res) => {
         if (!id_live) return res.status(400).json({ error: true, message: "يرجى إرسال id في الرابط" });
 
         const cacheKey = `smart_live_${id_live}`;
-        if (appCache.has(cacheKey)) return res.json(appCache.get(cacheKey));
-        if (pendingRequests[cacheKey]) return res.json(await pendingRequests[cacheKey]);
+        
+        // 🆕 التحقق من الكاش للمسار الذكي
+        if (appCache.has(cacheKey)) {
+            console.log(`⚡ [المسار الذكي] تقديم القناة من الكاش: ${id_live}`);
+            return res.json(appCache.get(cacheKey));
+        }
 
-        pendingRequests[cacheKey] = (async () => {
-            try {
-                const localBaseUrl = `http://localhost:${PORT}`;
-                try {
-                    const redirectResponse = await axios.get(`${localBaseUrl}/get-redirect-data?id_live=${id_live}`);
-                    const redirectData = redirectResponse.data;
-                    const returnedUrl = redirectData?.data?.url || "";
+        console.log(`🤖 [المسار الذكي] جاري فحص القناة: ${id_live}`);
+        const localBaseUrl = `http://localhost:${PORT}`;
 
-                    if (returnedUrl && returnedUrl !== "1" && returnedUrl !== "empty") {
-                        appCache.set(cacheKey, redirectData);
-                        return redirectData;
-                    }
-                } catch (err) {}
+        try {
+            const redirectResponse = await axios.get(`${localBaseUrl}/get-redirect-data?id_live=${id_live}`);
+            const redirectData = redirectResponse.data;
+            const returnedUrl = redirectData?.data?.url || "";
 
-                const streamResponse = await axios.get(`${localBaseUrl}/stream?id_live=${id_live}`);
-                const streamData = streamResponse.data;
-
-                let hasValidStreams = false;
-                if (streamData && Array.isArray(streamData.streams)) {
-                    hasValidStreams = streamData.streams.some(server => server.url && server.url.trim() !== "");
-                }
-
-                if (hasValidStreams) {
-                    appCache.set(cacheKey, streamData);
-                    return streamData;
-                }
-
-                try {
-                    const lastResponse = await axios.get(`${localBaseUrl}/last/${id_live}`);
-                    appCache.set(cacheKey, lastResponse.data);
-                    return lastResponse.data;
-                } catch (lastErr) {
-                    appCache.set(cacheKey, streamData); 
-                    return streamData;
-                }
-            } finally {
-                delete pendingRequests[cacheKey];
+            if (returnedUrl && returnedUrl !== "1" && returnedUrl !== "empty") {
+                console.log(`✅ [المسار الذكي] تم الحصول على رابط مباشر للقناة ${id_live}`);
+                appCache.set(cacheKey, redirectData); // حفظ في الكاش
+                return res.json(redirectData);
             }
-        })();
+        } catch (err) {}
 
-        return res.json(await pendingRequests[cacheKey]);
+        console.log(`🔄 [المسار الذكي] النتيجة غير صالحة (1)، جاري استدعاء مسار السيرفرات الكاملة...`);
+        const streamResponse = await axios.get(`${localBaseUrl}/stream?id_live=${id_live}`);
+        const streamData = streamResponse.data;
+
+        let hasValidStreams = false;
+        if (streamData && Array.isArray(streamData.streams)) {
+            hasValidStreams = streamData.streams.some(server => server.url && server.url.trim() !== "");
+        }
+
+        if (hasValidStreams) {
+            console.log(`✅ [المسار الذكي] تم العثور على سيرفرات تعمل للقناة ${id_live}`);
+            appCache.set(cacheKey, streamData); // حفظ في الكاش
+            return res.json(streamData);
+        }
+
+        console.log(`⚠️ تحذير: جميع السيرفرات فارغة! جاري التحويل إلى مسار البديل /last/ لقناة: ${id_live}`);
+        try {
+            const lastResponse = await axios.get(`${localBaseUrl}/last/${id_live}`);
+            appCache.set(cacheKey, lastResponse.data); // حفظ في الكاش
+            return res.json(lastResponse.data);
+        } catch (lastErr) {
+            appCache.set(cacheKey, streamData); // حفظ في الكاش حتى في حالة الخطأ لعدم إغراق السيرفر
+            return res.json(streamData);
+        }
+
     } catch (error) { res.status(500).json({ error: true, message: "حدث خطأ أثناء معالجة المسار الذكي: " + error.message }); }
 });
-
 // ==========================================
 // مسار مشترك: جلب بيانات الـ Redirect 
 // ==========================================
