@@ -603,9 +603,24 @@ app.get("/stream", async (req, res) => {
 
 
 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 // ==========================================
 // 1. مسار POST: استخراج رد مفكوك التشفير (مع دعم Double Redirect الذكي)
-// يُستخدم عند الطلب من داخل التطبيقات أو سكربتات برمجية
 // ==========================================
 app.post("/get-redirect-data", async (req, res) => {
     try {
@@ -617,7 +632,6 @@ app.post("/get-redirect-data", async (req, res) => {
             return res.status(400).json({ error: true, message: "يرجى إرسال id_live في الـ Body" });
         }
 
-        // 1. إذا لم يتم إرسال url في الطلب، نقوم بجلبه أولاً
         if (!url) {
             const streamsPostData = {
                 "user_id": "_82668_1785761367217_notloggedin.com_dramalive3",
@@ -646,26 +660,33 @@ app.post("/get-redirect-data", async (req, res) => {
             }
         }
 
-        // 2. إرسال الطلب الأول إلى getLiveByRedirect
+        // المحاولة الأولى
         let result = await sendRequest(id_live, url, agent, "", "getLiveByRedirect");
         let responseData = result.decrypted_response;
-        
         let returnedUrl = responseData?.data?.url || "";
-        let returnedAgent = responseData?.data?.agent || "";
 
-        // 3. التحقق الذكي: هل الرابط المسترجع مباشر؟
-        const isDirectStream = returnedUrl.includes(".m3u8") || returnedUrl.includes(".mpd");
-        
+        // 🎯 الفحص الذكي المطور
+        let isDirectStream = false;
+        let actualUrl = returnedUrl;
+        try {
+            const parsedUrlObj = JSON.parse(returnedUrl);
+            actualUrl = parsedUrlObj.url || returnedUrl;
+        } catch(e) {}
+
+        const isGateway = actualUrl.includes("token.") || actualUrl.includes("?url=") || actualUrl.includes(".LS.V2");
+        const hasStreamExt = actualUrl.includes(".m3u8") || actualUrl.includes(".mpd");
+
+        if (hasStreamExt && !isGateway && returnedUrl !== "1") {
+            isDirectStream = true;
+        }
+
         if (!isDirectStream && result.encrypted_response && returnedUrl !== "1") {
-            console.log(`🔄 [POST] الرابط غير مباشر للقناة ${id_live}، جاري تنفيذ Double Redirect...`);
-            
+            console.log(`🔄 [POST] الرابط غير مباشر (بوابة/توكن)، جاري تنفيذ Double Redirect...`);
             const encryptedRawData = result.encrypted_response.trim();
-            const nextAgent = returnedAgent === "redirect" ? "double_redirect" : (returnedAgent || "double_redirect");
-            
+            const nextAgent = "double_redirect"; // إجبار السيرفر على قبول الداتا المشفرة
             result = await sendRequest(id_live, returnedUrl, nextAgent, encryptedRawData, "getLiveByDoubleRedirect");
         }
 
-        // 4. إرجاع الرد النهائي
         res.json(result.decrypted_response);
 
     } catch (error) {
@@ -676,7 +697,6 @@ app.post("/get-redirect-data", async (req, res) => {
 
 // ==========================================
 // 2. مسار GET: جلب الرد مفكوك التشفير (مع دعم Double Redirect الذكي)
-// يُستخدم عند فتح الرابط مباشرة في المتصفح للفحص
 // ==========================================
 app.get("/get-redirect-data", async (req, res) => {
     try {
@@ -688,7 +708,6 @@ app.get("/get-redirect-data", async (req, res) => {
 
         console.log(`🔍 [GET] جلب الرابط الأساسي لقناة: ${id_live}`);
 
-        // 1. جلب الرابط الأساسي (url)
         const streamsPostData = {
             "user_id": "_82668_1785761367217_notloggedin.com_dramalive3",
             "device_id": "e603540e-ed93-47a3-bec6-a15f7f056604",
@@ -715,32 +734,46 @@ app.get("/get-redirect-data", async (req, res) => {
             return res.status(404).json({ error: true, message: "لم يتم العثور على رابط أساسي لهذه القناة" });
         }
 
-        // 2. إرسال الطلب الأول إلى getLiveByRedirect
+        // المحاولة الأولى
         let result = await sendRequest(id_live, url, "redirect", "", "getLiveByRedirect");
         let responseData = result.decrypted_response;
-        
         let returnedUrl = responseData?.data?.url || "";
-        let returnedAgent = responseData?.data?.agent || "";
 
-        // 3. التحقق الذكي: هل يحتاج إلى Double Redirect؟
-        const isDirectStream = returnedUrl.includes(".m3u8") || returnedUrl.includes(".mpd");
-        
+        // 🎯 الفحص الذكي المطور
+        let isDirectStream = false;
+        let actualUrl = returnedUrl;
+        try {
+            const parsedUrlObj = JSON.parse(returnedUrl);
+            actualUrl = parsedUrlObj.url || returnedUrl;
+        } catch(e) {}
+
+        const isGateway = actualUrl.includes("token.") || actualUrl.includes("?url=") || actualUrl.includes(".LS.V2");
+        const hasStreamExt = actualUrl.includes(".m3u8") || actualUrl.includes(".mpd");
+
+        if (hasStreamExt && !isGateway && returnedUrl !== "1") {
+            isDirectStream = true;
+        }
+
         if (!isDirectStream && result.encrypted_response && returnedUrl !== "1") {
-            console.log(`🔄 [GET] الرابط غير مباشر للقناة ${id_live}، جاري تنفيذ Double Redirect...`);
-            
+            console.log(`🔄 [GET] الرابط غير مباشر (بوابة/توكن)، جاري تنفيذ Double Redirect...`);
             const encryptedRawData = result.encrypted_response.trim();
-            const nextAgent = returnedAgent === "redirect" ? "double_redirect" : (returnedAgent || "double_redirect");
-            
+            const nextAgent = "double_redirect"; // إجبار السيرفر على قبول الداتا المشفرة
             result = await sendRequest(id_live, returnedUrl, nextAgent, encryptedRawData, "getLiveByDoubleRedirect");
         }
 
-        // 4. إرجاع الرد النهائي
         res.json(result.decrypted_response);
 
     } catch (error) {
         res.status(500).json({ error: true, message: error.message });
     }
 });
+
+
+
+
+
+
+
 
 
 
