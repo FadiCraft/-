@@ -815,10 +815,8 @@ app.get("/get-redirect-data", async (req, res) => {
 
 
 
-
 // ==========================================
-// 🆕 مسار ذكي مدمج: /live_id/:id 
-// يدمج بين الاستخراج السريع للرابط (Redirect) وبين جلب السيرفرات (Stream) كبديل
+// 🆕 المسار الذكي المدمج (عن طريق استدعاء المسارات الداخلية)
 // ==========================================
 app.get("/live_id/:id", async (req, res) => {
     try {
@@ -828,153 +826,38 @@ app.get("/live_id/:id", async (req, res) => {
             return res.status(400).json({ error: true, message: "يرجى إرسال id في الرابط" });
         }
 
-        console.log(`🤖 [المسار الذكي] جاري معالجة القناة: ${id_live}`);
+        console.log(`🤖 [المسار الذكي] جاري فحص القناة: ${id_live}`);
 
-        // 🎯 1. جلب البيانات الأساسية للقناة (تعمل كأساس للمسارين)
-        const streamsPostData = {
-            "user_id": "_82668_1785761367217_notloggedin.com_dramalive3",
-            "device_id": "e603540e-ed93-47a3-bec6-a15f7f056604",
-            "device_api": "28", "version_name": "187", "language": "ar",
-            "timezone": "Europe/Istanbul", "device_type": "phone",
-            "KEY_ACTIVATED_TYPE": "232425", "store": "direct",
-            "mainServer": "http://main.eastgoessouth.online/api/live/livedrama/v13.0.0/",
-            "type": "tv", "id_live": id_live, "id": id_live, "live_id": id_live, "channel_id": id_live
-        };
-        
-        const encryptedStreamBody = encryptAES(JSON.stringify(streamsPostData));
-        const streamRes = await axios.post("http://live.1spbgmu.com/api/live/livedrama/v13.0.0/getLiveAllStreamsById", encryptedStreamBody, {
-            headers: { "Content-Type": "text/plain", "User-Agent": "Dalvik/2.1.0 (Linux; U; Android 9; SM-S908E Build/TP1A.220624.014)", "Host": "live.1spbgmu.com", "Connection": "Keep-Alive" },
-            responseType: "arraybuffer",
-            timeout: 15000
-        });
-        
-        const decryptedStreamRes = decryptAES(Buffer.from(streamRes.data).toString("utf-8"));
-        const rawJson = JSON.parse(decryptedStreamRes);
-        const liveData = rawJson.live || {};
-        const url = liveData.url;
+        // رابط السيرفر المحلي الخاص بك
+        const localBaseUrl = `http://localhost:${PORT}`;
 
-        let smartResult = null;
-        let isDirectSuccess = false;
+        // 1. المحاولة الأولى: استدعاء مسار /get-redirect-data الداخلي
+        try {
+            const redirectResponse = await axios.get(`${localBaseUrl}/get-redirect-data?id_live=${id_live}`);
+            const redirectData = redirectResponse.data;
+            const returnedUrl = redirectData?.data?.url || "";
 
-        // 🎯 2. المحاولة الأولى: تطبيق منطق /get-redirect-data إذا توفر رابط
-        if (url && url !== "empty") {
-            let result = await sendRequest(id_live, url, "redirect", "", "getLiveByRedirect");
-            let responseData = result.decrypted_response;
-            let returnedUrl = responseData?.data?.url || "";
-
-            let isDirectStream = false;
-            let actualUrl = returnedUrl;
-            let actualHeaders = {};
-
-            try {
-                let actualUrlObj = JSON.parse(returnedUrl);
-                actualUrl = actualUrlObj.url || returnedUrl;
-                actualHeaders = actualUrlObj.headers || {};
-            } catch(e) {}
-
-            const isGateway = actualUrl.includes("token.") || actualUrl.includes("?url=") || actualUrl.includes(".LS.V2");
-            const hasStreamExt = actualUrl.includes(".m3u8") || actualUrl.includes(".mpd");
-
-            if (hasStreamExt && !isGateway && returnedUrl !== "1") {
-                isDirectStream = true;
+            // إذا كان الرابط موجوداً وليس "1"، نرجعه فوراً
+            if (returnedUrl && returnedUrl !== "1" && returnedUrl !== "empty") {
+                console.log(`✅ [المسار الذكي] تم الحصول على رابط مباشر للقناة ${id_live}`);
+                return res.json(redirectData);
             }
-
-            if (!isDirectStream && returnedUrl !== "1") {
-                let rawData = "";
-                if (actualUrl.includes("token.easybroadcast.io")) {
-                    try {
-                        const tokenRes = await axios.get(actualUrl, { headers: actualHeaders });
-                        if (tokenRes.data && typeof tokenRes.data === 'object') {
-                            rawData = Object.keys(tokenRes.data)
-                                .map(key => `${encodeURIComponent(key)}=${encodeURIComponent(tokenRes.data[key])}`)
-                                .join('&');
-                        } else if (typeof tokenRes.data === 'string') {
-                            rawData = tokenRes.data;
-                        }
-                    } catch (err) {}
-                } else if (result.encrypted_response) {
-                    rawData = result.encrypted_response.trim();
-                }
-
-                const nextAgent = "double_redirect";
-                result = await sendRequest(id_live, returnedUrl, nextAgent, rawData, "getLiveByDoubleRedirect");
-                responseData = result.decrypted_response;
-                returnedUrl = responseData?.data?.url || "";
-            }
-
-            // التحقق مما إذا كانت النتيجة النهائية ناجحة وليست "1"
-            if (returnedUrl && returnedUrl !== "1" && returnedUrl !== "") {
-                smartResult = responseData;
-                isDirectSuccess = true;
-            }
+        } catch (err) {
+            console.log(`⚠️ فشل أو خطأ في مسار Redirect، سيتم الانتقال لمسار Stream...`);
         }
 
-        // 🎯 3. اتخاذ القرار بناءً على النتيجة
-        if (isDirectSuccess) {
-            console.log(`✅ [المسار الذكي] تم جلب رابط Redirect بنجاح للقناة ${id_live}`);
-            return res.json(smartResult);
-        } else {
-            console.log(`⚠️ [المسار الذكي] النتيجة فارغة أو (1)، جاري تحويل الطلب لجلب قائمة السيرفرات...`);
-            
-            // تطبيق منطق /stream كبديل ذكي
-            let parsedStreams = [];
-            const mainUrl = liveData.url || "";
-            const mainAgent = liveData.agent || "";
-            
-            if (mainUrl && mainUrl !== "empty") {
-                const server = await processServer(id_live, "temp", mainUrl, mainAgent);
-                parsedStreams.push(server);
-            }
-
-            const backupStr = liveData.backup || "";
-            if (backupStr) {
-                const backupParts = backupStr.split("-;-");
-                for (let i = 0; i < backupParts.length; i++) {
-                    const part = backupParts[i].trim();
-                    if (!part) continue;
-                    const subParts = part.split("--");
-                    const linkData = subParts[0] ? subParts[0].trim() : "";
-                    const agentData = subParts[1] ? subParts[1].trim() : "";
-                    if (!linkData || linkData === "empty") continue;
-                    
-                    const server = await processServer(id_live, "temp", linkData, agentData);
-                    parsedStreams.push(server);
-                }
-            }
-
-            // فرز السيرفرات وإعادة تسميتها
-            parsedStreams.sort((a, b) => {
-                const urlA = (a.url || "").toLowerCase();
-                const urlB = (b.url || "").toLowerCase();
-                const getPriority = (url) => {
-                    if (!url) return 4;
-                    if (url.includes(".mpd")) return 1;
-                    if (url.includes(".m3u8")) return 2;
-                    return 3;
-                };
-                return getPriority(urlA) - getPriority(urlB);
-            });
-
-            parsedStreams.forEach((stream, index) => {
-                stream.server_name = `سيرفر ${index + 1}`;
-            });
-
-            return res.json({
-                id_live: liveData.id_live || id_live,
-                name: liveData.name || "",
-                img_url: liveData.img_url || "",
-                streams: parsedStreams
-            });
-        }
+        // 2. المحاولة الثانية (البديل): استدعاء مسار /stream الداخلي
+        console.log(`🔄 [المسار الذكي] النتيجة غير صالحة (1)، جاري استدعاء مسار السيرفرات الكاملة...`);
+        
+        const streamResponse = await axios.get(`${localBaseUrl}/stream?id_live=${id_live}`);
+        
+        // إرجاع نتيجة مسار السيرفرات كما هي
+        return res.json(streamResponse.data);
 
     } catch (error) {
-        res.status(500).json({ error: true, message: error.message });
+        res.status(500).json({ error: true, message: "حدث خطأ أثناء معالجة المسار الذكي: " + error.message });
     }
 });
-
-
-
-
 
 
 
