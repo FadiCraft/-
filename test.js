@@ -508,14 +508,16 @@ app.get("/channels", async (req, res) => {
 
 
 // ==========================================
-// 2. 🆕 مسار /stream (معدل مع الفرز وإعادة التسمية)
+// 2. مسار /stream (مبسط: يطلب، يفك التشفير، ويعرض النتيجة كما هي)
 // ==========================================
 app.get("/stream", async (req, res) => {
     try {
         const id_live = req.query.id_live;
-        if (!id_live) return res.status(400).json({ error: true, message: "يرجى إرسال id_live" });
+        if (!id_live) {
+            return res.status(400).json({ error: true, message: "يرجى إرسال id_live" });
+        }
 
-        console.log(`📺 جلب سيرفرات: ${id_live}`);
+        console.log(`📺 جلب السيرفرات وعرضها مباشرة: ${id_live}`);
 
         const postData = {
             "user_id": "_82668_1785761367217_notloggedin.com_dramalive3",
@@ -529,73 +531,33 @@ app.get("/stream", async (req, res) => {
             "type": "tv", "id_live": id_live, "id": id_live, "live_id": id_live, "channel_id": id_live
         };
 
+        // تشفير الطلب
         const encryptedBody = encryptAES(JSON.stringify(postData));
+        
+        // إرسال الطلب للسيرفر
         const response = await axios.post("http://live.1spbgmu.com/api/live/livedrama/v13.0.0/getLiveAllStreamsById", encryptedBody, {
-            headers: { "Content-Type": "text/plain", "User-Agent": "Dalvik/2.1.0 (Linux; U; Android 9; SM-S908E Build/TP1A.220624.014)", "Host": "live.1spbgmu.com", "Connection": "Keep-Alive" },
-            timeout: 30000, responseType: "arraybuffer"
+            headers: { 
+                "Content-Type": "text/plain", 
+                "User-Agent": "Dalvik/2.1.0 (Linux; U; Android 9; SM-S908E Build/TP1A.220624.014)", 
+                "Host": "live.1spbgmu.com", 
+                "Connection": "Keep-Alive" 
+            },
+            timeout: 30000, 
+            responseType: "arraybuffer"
         });
 
+        // فك تشفير الرد
         const decryptedResponse = decryptAES(Buffer.from(response.data).toString("utf-8"));
         const rawJson = JSON.parse(decryptedResponse);
-        const liveData = rawJson.live || {};
 
-        let parsedStreams = [];
-        
-        const mainUrl = liveData.url || "";
-        const mainAgent = liveData.agent || "";
-        if (mainUrl && mainUrl !== "empty") {
-            // نمرر اسماً مؤقتاً هنا لأننا سنعيد التسمية لاحقاً
-            const server = await processServer(id_live, "temp", mainUrl, mainAgent);
-            parsedStreams.push(server);
-        }
+        // عرض الرد كما هو تماماً بدون أي تعديلات أو إضافات
+        res.json(rawJson);
 
-        const backupStr = liveData.backup || "";
-        if (backupStr) {
-            const backupParts = backupStr.split("-;-");
-            for (let i = 0; i < backupParts.length; i++) {
-                const part = backupParts[i].trim();
-                if (!part) continue;
-                const subParts = part.split("--");
-                const linkData = subParts[0] ? subParts[0].trim() : "";
-                const agentData = subParts[1] ? subParts[1].trim() : "";
-                if (!linkData || linkData === "empty") continue;
-                // نمرر اسماً مؤقتاً
-                const server = await processServer(id_live, "temp", linkData, agentData);
-                parsedStreams.push(server);
-            }
-        }
-
-        // 🎯 1. فرز السيرفرات حسب الأولوية (.mpd ثم .m3u8 ثم الباقي ثم الفارغ)
-        parsedStreams.sort((a, b) => {
-            const urlA = (a.url || "").toLowerCase();
-            const urlB = (b.url || "").toLowerCase();
-
-            // دالة تحديد الأولوية (الرقم الأقل يعني أولوية أعلى)
-            const getPriority = (url) => {
-                if (!url) return 4;                     // الروابط الفارغة تأخذ أقل أولوية
-                if (url.includes(".mpd")) return 1;     // MPD في المركز الأول
-                if (url.includes(".m3u8")) return 2;    // M3U8 في المركز الثاني
-                return 3;                               // أي روابط أخرى في المركز الثالث
-            };
-
-            return getPriority(urlA) - getPriority(urlB);
-        });
-
-        // 🎯 2. إعادة التسمية بالتسلسل (سيرفر 1، سيرفر 2، ...)
-        parsedStreams.forEach((stream, index) => {
-            stream.server_name = `سيرفر ${index + 1}`;
-        });
-
-        res.json({
-            id_live: liveData.id_live || id_live,
-            name: liveData.name || "",
-            img_url: liveData.img_url || "",
-            streams: parsedStreams
-        });
-
-    } catch (error) { res.status(500).json({ error: true, message: error.message }); }
+    } catch (error) { 
+        console.error(`❌ خطأ في مسار /stream: ${error.message}`);
+        res.status(500).json({ error: true, message: error.message }); 
+    }
 });
-
 
 
 
