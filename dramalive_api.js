@@ -816,6 +816,8 @@ app.get("/get-redirect-data", async (req, res) => {
 
 
 
+
+
 // ==========================================
 // مسار ذكي: يجمع get-redirect-data + stream مع فحص الرابط الفارغ
 // ==========================================
@@ -864,7 +866,8 @@ app.get("/live_id/:id_live", async (req, res) => {
         let responseData = result.decrypted_response;
         let returnedUrl = responseData?.data?.url || "";
 
-        console.log(`📋 الرد الأول: ${returnedUrl}`);
+        console.log(`📋 الرد الأول - returnedUrl: "${returnedUrl}"`);
+        console.log(`📋 نوع البيانات: ${typeof returnedUrl}`);
 
         // ═══════════════════════════════════════════
         // 🎯 فحص شامل: هل الرابط "1" أو فارغ أو JSON بيه url=""
@@ -873,38 +876,45 @@ app.get("/live_id/:id_live", async (req, res) => {
 
         // فحص 1: "1" أو فارغ مباشرة
         if (returnedUrl === "1" || returnedUrl === "" || returnedUrl === "empty") {
+            console.log(`✅ فحص 1: الرابط "1" أو فارغ → shouldSwitchToStream = true`);
             shouldSwitchToStream = true;
         }
 
         // فحص 2: إذا كان JSON نحاول نفكه ونشوف الـ url جواه
-        if (!shouldSwitchToStream) {
+        if (!shouldSwitchToStream && returnedUrl.startsWith("{")) {
             try {
                 const parsedUrl = JSON.parse(returnedUrl);
+                console.log(`🔍 فحص 2: parsedUrl.url = "${parsedUrl.url}"`);
                 // لو الـ url فاضي أو "1"
                 if (!parsedUrl.url || parsedUrl.url === "" || parsedUrl.url === "1") {
+                    console.log(`✅ فحص 2: JSON بيه url فاضي/1 → shouldSwitchToStream = true`);
                     shouldSwitchToStream = true;
                 }
             } catch(e) {
-                // مش JSON، نكمل عادي
+                console.log(`⚠️ مش JSON صالح: ${e.message}`);
             }
         }
+
+        console.log(`🎯 shouldSwitchToStream = ${shouldSwitchToStream}`);
 
         // ═══════════════════════════════════════════
         // ✅ إذا محتاج تحويل لـ stream
         // ═══════════════════════════════════════════
         if (shouldSwitchToStream) {
-            console.log(`⚠️ الرابط غير صالح (فارغ/"1"/JSON بدون رابط) → 🎯 تحويل مباشر لـ /stream`);
+            console.log(`⚠️ 🎯 جاري التحويل لـ /stream...`);
             
             let parsedStreams = [];
             const mainAgent = liveData.agent || "";
             
             if (mainUrl && mainUrl !== "empty") {
+                console.log(`📡 معالجة السيرفر الأساسي...`);
                 const server = await processServer(id_live, "temp", mainUrl, mainAgent);
                 parsedStreams.push(server);
             }
 
             const backupStr = liveData.backup || "";
             if (backupStr) {
+                console.log(`📡 معالجة السيرفرات البديلة...`);
                 const backupParts = backupStr.split("-;-");
                 for (let i = 0; i < backupParts.length; i++) {
                     const part = backupParts[i].trim();
@@ -919,6 +929,8 @@ app.get("/live_id/:id_live", async (req, res) => {
                     parsedStreams.push(server);
                 }
             }
+
+            console.log(`✅ تم تجهيز ${parsedStreams.length} سيرفر`);
 
             parsedStreams.sort((a, b) => {
                 const urlA = (a.url || "").toLowerCase();
@@ -936,6 +948,7 @@ app.get("/live_id/:id_live", async (req, res) => {
                 stream.server_name = `سيرفر ${index + 1}`;
             });
 
+            console.log(`🎉 إرجاع نتيجة stream...`);
             return res.json({
                 id_live: liveData.id_live || id_live,
                 name: liveData.name || "",
@@ -947,6 +960,8 @@ app.get("/live_id/:id_live", async (req, res) => {
         // ═══════════════════════════════════════════
         // 🎯 الرابط صالح، نكمل Double Redirect إذا احتاج
         // ═══════════════════════════════════════════
+        console.log(`✅ الرابط صالح، متابعة Double Redirect...`);
+        
         let isDirectStream = false;
         let actualUrlObj = {};
         let actualUrl = returnedUrl;
@@ -991,12 +1006,16 @@ app.get("/live_id/:id_live", async (req, res) => {
             result = await sendRequest(id_live, returnedUrl, "double_redirect", rawData, "getLiveByDoubleRedirect");
         }
 
+        console.log(`🎉 إرجاع نتيجة Double Redirect...`);
         return res.json(result.decrypted_response);
 
     } catch (error) {
+        console.log(`💥 خطأ: ${error.message}`);
         res.status(500).json({ error: true, message: error.message });
     }
 });
+
+
 
 
 
