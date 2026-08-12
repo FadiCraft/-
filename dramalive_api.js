@@ -849,7 +849,7 @@ app.get("/live_id/:id", async (req, res) => {
         // 2. المحاولة الثانية (البديل): استدعاء مسار /stream الداخلي
         console.log(`🔄 [المسار الذكي] النتيجة غير صالحة (1)، جاري استدعاء مسار السيرفرات الكاملة...`);
         
-        const streamResponse = await axios.get(`${localBaseUrl}/stream?id_live=${id_live}`);
+        const streamResponse = await axios.get(`${localBaseUrl}/live_id2/${id_live}`);
         
         // إرجاع نتيجة مسار السيرفرات كما هي
         return res.json(streamResponse.data);
