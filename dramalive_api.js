@@ -867,7 +867,7 @@ app.get("/live_id/:id", async (req, res) => {
         
         try {
             // استبدل هذا الرابط بالمسار الفعلي لـ /last/ لديك (سواء داخلي أو دالة برمجية)
-            const lastResponse = await axios.get(`${localBaseUrl}/last?id_live=${id_live}`);
+            const lastResponse = await axios.get(`${localBaseUrl}/last/${id_live}`);
             return res.json(lastResponse.data);
         } catch (lastErr) {
             // إذا فشل مسار /last أو لم يكن موجوداً، نرجع هيكل الـ streams الفارغ كخطة أخيرة
