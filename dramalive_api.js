@@ -816,10 +816,8 @@ app.get("/get-redirect-data", async (req, res) => {
 
 
 
-
-
 // ==========================================
-// مسار مشترك شامل: يجرب get-redirect-data أولاً، إذا كان "1" يحول لـ stream
+// مسار ذكي: get-redirect-data + stream في واحد
 // ==========================================
 app.get("/live_id/:id_live", async (req, res) => {
     try {
@@ -829,14 +827,11 @@ app.get("/live_id/:id_live", async (req, res) => {
             return res.status(400).json({ error: true, message: "يرجى إرسال id_live في المسار" });
         }
 
-        console.log(`🚀 بدء معالجة المسار الشامل لقناة: ${id_live}`);
+        console.log(`🚀 معالجة ذكية لقناة: ${id_live}`);
 
         // ═══════════════════════════════════════════
-        // الخطوة 1: تجربة get-redirect-data أولاً
+        // الخطوة 1: نجيب الرابط الأساسي من getLiveAllStreamsById
         // ═══════════════════════════════════════════
-        console.log(`🔍 [الخطوة 1] تجربة get-redirect-data...`);
-        
-        // نجيب الرابط الأساسي أولاً (لازم نعرفه عشان نرسله لـ getLiveByRedirect)
         const streamsPostData = {
             "user_id": "_82668_1785761367217_notloggedin.com_dramalive3",
             "device_id": "e603540e-ed93-47a3-bec6-a15f7f056604",
@@ -866,11 +861,13 @@ app.get("/live_id/:id_live", async (req, res) => {
             return res.status(404).json({ error: true, message: "لم يتم العثور على رابط أساسي لهذه القناة" });
         }
 
-        // 🎯 إرسال الطلب الأول لـ getLiveByRedirect (نفس وظيفة /get-redirect-data)
+        // ═══════════════════════════════════════════
+        // الخطوة 2: نجرب getLiveByRedirect
+        // ═══════════════════════════════════════════
+        console.log(`📡 إرسال getLiveByRedirect...`);
         let redirectResult = await sendRequest(id_live, mainUrl, "redirect", "", "getLiveByRedirect");
         let redirectData = redirectResult.decrypted_response;
 
-        // 🎯 استخراج url و agent من الرد
         let urlVal = "";
         let agentVal = "";
         if (redirectData && redirectData.data) {
@@ -878,13 +875,13 @@ app.get("/live_id/:id_live", async (req, res) => {
             agentVal = (redirectData.data.agent || "").toString().trim();
         }
 
-        console.log(`📋 نتيجة get-redirect-data: url="${urlVal}", agent="${agentVal}"`);
+        console.log(`📋 نتيجة: url="${urlVal}", agent="${agentVal}"`);
 
         // ═══════════════════════════════════════════
-        // 🆕 التحقق: إذا كان url === "1" و agent === "1" → نحول مباشرة لـ stream
+        // 🎯 فحص 1: url === "1" → تحويل مباشر لـ /stream
         // ═══════════════════════════════════════════
-        if (urlVal === "1" && agentVal === "1") {
-            console.log(`⚠️ الرد كان (url: "1", agent: "1")، 🎯 التحويل المباشر إلى stream (بدون إعادة إرسال)`);
+        if (urlVal === "1" || urlVal === "" || urlVal === "empty") {
+            console.log(`⚠️ الرابط "1" أو فارغ → 🎯 تحويل إلى /stream`);
             
             let parsedStreams = [];
             const mainAgent = liveData.agent || "";
@@ -913,7 +910,7 @@ app.get("/live_id/:id_live", async (req, res) => {
                 }
             }
 
-            // 🎯 فرز السيرفرات حسب الأولوية (.mpd ثم .m3u8 ثم الباقي ثم الفارغ)
+            // فرز حسب الأولوية
             parsedStreams.sort((a, b) => {
                 const urlA = (a.url || "").toLowerCase();
                 const urlB = (b.url || "").toLowerCase();
@@ -926,12 +923,11 @@ app.get("/live_id/:id_live", async (req, res) => {
                 return getPriority(urlA) - getPriority(urlB);
             });
 
-            // 🎯 إعادة التسمية بالتسلسل
+            // إعادة التسمية
             parsedStreams.forEach((stream, index) => {
                 stream.server_name = `سيرفر ${index + 1}`;
             });
 
-            // ✅ إرجاع مخرجات الـ Stream مباشرة
             return res.json({
                 id_live: liveData.id_live || id_live,
                 name: liveData.name || "",
@@ -941,63 +937,62 @@ app.get("/live_id/:id_live", async (req, res) => {
         }
 
         // ═══════════════════════════════════════════
-        // الخطوة 2: إذا لم يكن "1"، نكمل المعالجة العادية
+        // 🎯 فحص 2: هل الرابط مباشر ولا يحتاج Double Redirect؟
         // ═══════════════════════════════════════════
-        console.log(`✅ الرابط ليس "1"، متابعة المعالجة العادية...`);
-
-        // 🎯 الفحص الذكي: هل هو مباشر أم يحتاج Double Redirect
-        let isDirectStream = false;
-        let actualUrlObj = {};
         let actualUrl = urlVal;
         let actualHeaders = {};
+        let isJsonUrl = false;
 
         try {
-            actualUrlObj = JSON.parse(urlVal);
+            const actualUrlObj = JSON.parse(urlVal);
             actualUrl = actualUrlObj.url || urlVal;
             actualHeaders = actualUrlObj.headers || {};
+            isJsonUrl = true;
         } catch(e) {}
 
         const isGateway = actualUrl.includes("token.") || actualUrl.includes("?url=") || actualUrl.includes(".LS.V2");
         const hasStreamExt = actualUrl.includes(".m3u8") || actualUrl.includes(".mpd");
 
+        // إذا كان رابط مباشر (m3u8/mpd بدون LS.V2 أو token)
         if (hasStreamExt && !isGateway) {
-            isDirectStream = true;
+            console.log(`✅ رابط مباشر، إرجاع النتيجة`);
+            return res.json(redirectData);
         }
 
-        // إذا لم يكن مباشراً (يحتاج Double Redirect)
-        if (!isDirectStream) {
-            console.log(`🔄 [Double Redirect] القناة تحتاج استخراج ثاني، جاري تجهيز البيانات والتوكن...`);
-            let rawData = "";
+        // ═══════════════════════════════════════════
+        // 🎯 فحص 3: يحتاج Double Redirect
+        // ═══════════════════════════════════════════
+        console.log(`🔄 الرابط يحتاج Double Redirect، جاري التجهيز...`);
+        
+        let rawData = "";
 
-            if (actualUrl.includes("token.easybroadcast.io")) {
-                try {
-                    const tokenRes = await axios.get(actualUrl, { headers: actualHeaders });
-                    if (tokenRes.data && typeof tokenRes.data === 'object') {
-                        rawData = Object.keys(tokenRes.data)
-                            .map(key => `${encodeURIComponent(key)}=${encodeURIComponent(tokenRes.data[key])}`)
-                            .join('&');
-                    } else if (typeof tokenRes.data === 'string') {
-                        rawData = tokenRes.data;
-                    }
-                } catch (err) {
-                    console.log(`⚠️ فشل جلب التوكن الوسيط: ${err.message}`);
+        // لو فيه token easybroadcast
+        if (actualUrl.includes("token.easybroadcast.io")) {
+            try {
+                console.log(`🔑 جاري استخراج التوكن...`);
+                const tokenRes = await axios.get(actualUrl, { headers: actualHeaders });
+                if (tokenRes.data && typeof tokenRes.data === 'object') {
+                    rawData = Object.keys(tokenRes.data)
+                        .map(key => `${encodeURIComponent(key)}=${encodeURIComponent(tokenRes.data[key])}`)
+                        .join('&');
+                } else if (typeof tokenRes.data === 'string') {
+                    rawData = tokenRes.data;
                 }
-            } else if (redirectResult.encrypted_response) {
-                rawData = redirectResult.encrypted_response.trim();
+            } catch (err) {
+                console.log(`⚠️ فشل جلب التوكن: ${err.message}`);
             }
-
-            const doubleResult = await sendRequest(id_live, urlVal, "double_redirect", rawData, "getLiveByDoubleRedirect");
-            return res.json(doubleResult.decrypted_response);
+        } else if (redirectResult.encrypted_response) {
+            rawData = redirectResult.encrypted_response.trim();
         }
 
-        // ✅ الرابط مباشر، نرجع نتيجة التوجيه مباشرة
-        return res.json(redirectData);
+        // إرسال getLiveByDoubleRedirect
+        const doubleResult = await sendRequest(id_live, urlVal, "double_redirect", rawData, "getLiveByDoubleRedirect");
+        return res.json(doubleResult.decrypted_response);
 
     } catch (error) {
         res.status(500).json({ error: true, message: error.message });
     }
 });
-
 
 
 
