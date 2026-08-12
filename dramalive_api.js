@@ -599,78 +599,13 @@ app.get("/stream", async (req, res) => {
 
 
 
-// ==========================================
-// مسار جديد: استخراج رد getLiveByRedirect مفكوك التشفير عبر id_live
-// ==========================================
-app.post("/get-redirect-data", async (req, res) => {
-    try {
-        const id_live = req.body.id_live;
-        let url = req.body.url;
-        const agent = req.body.agent || "redirect";
-
-        if (!id_live) {
-            return res.status(400).json({ error: true, message: "يرجى إرسال id_live في الـ Body" });
-        }
-
-        // 1. إذا لم يتم إرسال url في الطلب، نقوم بجلبه أولاً (لأنه مطلوب في getLiveByRedirect)
-        if (!url) {
-            const streamsPostData = {
-                "user_id": "_82668_1785761367217_notloggedin.com_dramalive3",
-                "device_id": "e603540e-ed93-47a3-bec6-a15f7f056604",
-                "device_api": "28", "version_name": "187", "language": "ar",
-                "timezone": "Europe/Istanbul", "device_type": "phone",
-                "KEY_ACTIVATED_TYPE": "232425", "store": "direct",
-                "mainServer": "http://main.eastgoessouth.online/api/live/livedrama/v13.0.0/",
-                "type": "tv", "id_live": id_live, "id": id_live, "live_id": id_live, "channel_id": id_live
-            };
-            
-            const encryptedStreamBody = encryptAES(JSON.stringify(streamsPostData));
-            
-            const streamRes = await axios.post("http://live.1spbgmu.com/api/live/livedrama/v13.0.0/getLiveAllStreamsById", encryptedStreamBody, {
-                headers: { "Content-Type": "text/plain", "User-Agent": "Dalvik/2.1.0 (Linux; U; Android 9; SM-S908E Build/TP1A.220624.014)", "Host": "live.1spbgmu.com", "Connection": "Keep-Alive" },
-                responseType: "arraybuffer",
-                timeout: 15000
-            });
-            
-            const decryptedStreamRes = decryptAES(Buffer.from(streamRes.data).toString("utf-8"));
-            const streamJson = JSON.parse(decryptedStreamRes);
-            url = streamJson.live?.url;
-
-            if (!url || url === "empty") {
-                return res.status(404).json({ error: true, message: "لم يتم العثور على رابط أساسي لهذه القناة لإرساله" });
-            }
-        }
-
-        // 2. الآن نرسل الطلب إلى getLiveByRedirect باستخدام دالة sendRequest الموجودة عندك مسبقاً
-        const result = await sendRequest(id_live, url, agent, "", "getLiveByRedirect");
-
-        // 3. نُرجع لك الرد مفكوك التشفير (JSON الصافي الذي طلبته)
-        res.json(result.decrypted_response);
-
-    } catch (error) {
-        res.status(500).json({ error: true, message: error.message });
-    }
-});
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
 
 
 
 // ==========================================
-// مسار معدل: استخراج رد getLiveByRedirect مفكوك التشفير (مع دعم Double Redirect الذكي)
+// 1. مسار POST: استخراج رد مفكوك التشفير (مع دعم Double Redirect الذكي)
+// يُستخدم عند الطلب من داخل التطبيقات أو سكربتات برمجية
 // ==========================================
 app.post("/get-redirect-data", async (req, res) => {
     try {
@@ -719,21 +654,18 @@ app.post("/get-redirect-data", async (req, res) => {
         let returnedAgent = responseData?.data?.agent || "";
 
         // 3. التحقق الذكي: هل الرابط المسترجع مباشر؟
-        // إذا لم يكن يحتوي على m3u8 أو mpd، فهذا يعني أنه يحتاج إلى Double Redirect
         const isDirectStream = returnedUrl.includes(".m3u8") || returnedUrl.includes(".mpd");
         
-        if (!isDirectStream && result.encrypted_response) {
-            console.log(`🔄 الرابط غير مباشر للقناة ${id_live}، جاري تنفيذ Double Redirect...`);
+        if (!isDirectStream && result.encrypted_response && returnedUrl !== "1") {
+            console.log(`🔄 [POST] الرابط غير مباشر للقناة ${id_live}، جاري تنفيذ Double Redirect...`);
             
-            // نأخذ الرد المشفر من الطلب الأول لنرسله كـ raw_data
             const encryptedRawData = result.encrypted_response.trim();
             const nextAgent = returnedAgent === "redirect" ? "double_redirect" : (returnedAgent || "double_redirect");
             
-            // نرسل الطلب الثاني إلى getLiveByDoubleRedirect
             result = await sendRequest(id_live, returnedUrl, nextAgent, encryptedRawData, "getLiveByDoubleRedirect");
         }
 
-        // 4. نُرجع لك الرد مفكوك التشفير النهائي (سواء نجح من الطلب الأول أو الثاني)
+        // 4. إرجاع الرد النهائي
         res.json(result.decrypted_response);
 
     } catch (error) {
@@ -742,10 +674,73 @@ app.post("/get-redirect-data", async (req, res) => {
 });
 
 
+// ==========================================
+// 2. مسار GET: جلب الرد مفكوك التشفير (مع دعم Double Redirect الذكي)
+// يُستخدم عند فتح الرابط مباشرة في المتصفح للفحص
+// ==========================================
+app.get("/get-redirect-data", async (req, res) => {
+    try {
+        const id_live = req.query.id_live;
 
+        if (!id_live) {
+            return res.status(400).json({ error: true, message: "يرجى إرسال id_live في الرابط" });
+        }
 
+        console.log(`🔍 [GET] جلب الرابط الأساسي لقناة: ${id_live}`);
 
+        // 1. جلب الرابط الأساسي (url)
+        const streamsPostData = {
+            "user_id": "_82668_1785761367217_notloggedin.com_dramalive3",
+            "device_id": "e603540e-ed93-47a3-bec6-a15f7f056604",
+            "device_api": "28", "version_name": "187", "language": "ar",
+            "timezone": "Europe/Istanbul", "device_type": "phone",
+            "KEY_ACTIVATED_TYPE": "232425", "store": "direct",
+            "mainServer": "http://main.eastgoessouth.online/api/live/livedrama/v13.0.0/",
+            "type": "tv", "id_live": id_live, "id": id_live, "live_id": id_live, "channel_id": id_live
+        };
+        
+        const encryptedStreamBody = encryptAES(JSON.stringify(streamsPostData));
+        
+        const streamRes = await axios.post("http://live.1spbgmu.com/api/live/livedrama/v13.0.0/getLiveAllStreamsById", encryptedStreamBody, {
+            headers: { "Content-Type": "text/plain", "User-Agent": "Dalvik/2.1.0 (Linux; U; Android 9; SM-S908E Build/TP1A.220624.014)", "Host": "live.1spbgmu.com", "Connection": "Keep-Alive" },
+            responseType: "arraybuffer",
+            timeout: 15000
+        });
+        
+        const decryptedStreamRes = decryptAES(Buffer.from(streamRes.data).toString("utf-8"));
+        const streamJson = JSON.parse(decryptedStreamRes);
+        const url = streamJson.live?.url;
 
+        if (!url || url === "empty") {
+            return res.status(404).json({ error: true, message: "لم يتم العثور على رابط أساسي لهذه القناة" });
+        }
+
+        // 2. إرسال الطلب الأول إلى getLiveByRedirect
+        let result = await sendRequest(id_live, url, "redirect", "", "getLiveByRedirect");
+        let responseData = result.decrypted_response;
+        
+        let returnedUrl = responseData?.data?.url || "";
+        let returnedAgent = responseData?.data?.agent || "";
+
+        // 3. التحقق الذكي: هل يحتاج إلى Double Redirect؟
+        const isDirectStream = returnedUrl.includes(".m3u8") || returnedUrl.includes(".mpd");
+        
+        if (!isDirectStream && result.encrypted_response && returnedUrl !== "1") {
+            console.log(`🔄 [GET] الرابط غير مباشر للقناة ${id_live}، جاري تنفيذ Double Redirect...`);
+            
+            const encryptedRawData = result.encrypted_response.trim();
+            const nextAgent = returnedAgent === "redirect" ? "double_redirect" : (returnedAgent || "double_redirect");
+            
+            result = await sendRequest(id_live, returnedUrl, nextAgent, encryptedRawData, "getLiveByDoubleRedirect");
+        }
+
+        // 4. إرجاع الرد النهائي
+        res.json(result.decrypted_response);
+
+    } catch (error) {
+        res.status(500).json({ error: true, message: error.message });
+    }
+});
 
 
 
