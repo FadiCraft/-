@@ -818,9 +818,8 @@ app.get("/get-redirect-data", async (req, res) => {
 
 
 
-
 // ==========================================
-// مسار مشترك شامل: فحص Redirect، وإذا كان url يساوي "1" ينتقل تلقائياً للـ Stream والبدائل
+// مسار مشترك شامل: يجرب get-redirect-data أولاً، إذا كان "1" يحول لـ stream
 // ==========================================
 app.get("/live_id/:id_live", async (req, res) => {
     try {
@@ -832,7 +831,12 @@ app.get("/live_id/:id_live", async (req, res) => {
 
         console.log(`🚀 بدء معالجة المسار الشامل لقناة: ${id_live}`);
 
-        // 1. جلب بيانات البث الأساسية لمعرفة الرابط والسيرفرات البديلة
+        // ═══════════════════════════════════════════
+        // الخطوة 1: تجربة get-redirect-data أولاً
+        // ═══════════════════════════════════════════
+        console.log(`🔍 [الخطوة 1] تجربة get-redirect-data...`);
+        
+        // نجيب الرابط الأساسي أولاً (لازم نعرفه عشان نرسله لـ getLiveByRedirect)
         const streamsPostData = {
             "user_id": "_82668_1785761367217_notloggedin.com_dramalive3",
             "device_id": "e603540e-ed93-47a3-bec6-a15f7f056604",
@@ -856,14 +860,14 @@ app.get("/live_id/:id_live", async (req, res) => {
         const decryptedStreamRes = decryptAES(Buffer.from(streamRes.data).toString("utf-8"));
         const streamJson = JSON.parse(decryptedStreamRes);
         const liveData = streamJson.live || {};
-        const url = liveData.url;
+        const mainUrl = liveData.url;
 
-        if (!url || url === "empty") {
+        if (!mainUrl || mainUrl === "empty") {
             return res.status(404).json({ error: true, message: "لم يتم العثور على رابط أساسي لهذه القناة" });
         }
 
-        // 2. المحاولة الأولى: إرسال الطلب إلى getLiveByRedirect
-        let redirectResult = await sendRequest(id_live, url, "redirect", "", "getLiveByRedirect");
+        // 🎯 إرسال الطلب الأول لـ getLiveByRedirect (نفس وظيفة /get-redirect-data)
+        let redirectResult = await sendRequest(id_live, mainUrl, "redirect", "", "getLiveByRedirect");
         let redirectData = redirectResult.decrypted_response;
 
         // 🎯 استخراج url و agent من الرد
@@ -874,19 +878,24 @@ app.get("/live_id/:id_live", async (req, res) => {
             agentVal = (redirectData.data.agent || "").toString().trim();
         }
 
-        // 3. 🆕 التحقق الحاسم: إذا كان url === "1" و agent === "1" → ننتقل للـ Stream فوراً
+        console.log(`📋 نتيجة get-redirect-data: url="${urlVal}", agent="${agentVal}"`);
+
+        // ═══════════════════════════════════════════
+        // 🆕 التحقق: إذا كان url === "1" و agent === "1" → نحول مباشرة لـ stream
+        // ═══════════════════════════════════════════
         if (urlVal === "1" && agentVal === "1") {
-            console.log(`⚠️ الرد التوجيهي كان (url: "1", agent: "1")، جاري التحويل التلقائي إلى وظيفة الـ stream لقناة: ${id_live}`);
+            console.log(`⚠️ الرد كان (url: "1", agent: "1")، 🎯 التحويل المباشر إلى stream (بدون إعادة إرسال)`);
             
             let parsedStreams = [];
-            const mainUrl = liveData.url || "";
             const mainAgent = liveData.agent || "";
             
+            // معالجة الرابط الأساسي
             if (mainUrl && mainUrl !== "empty") {
                 const server = await processServer(id_live, "temp", mainUrl, mainAgent);
                 parsedStreams.push(server);
             }
 
+            // معالجة البدائل
             const backupStr = liveData.backup || "";
             if (backupStr) {
                 const backupParts = backupStr.split("-;-");
@@ -922,7 +931,7 @@ app.get("/live_id/:id_live", async (req, res) => {
                 stream.server_name = `سيرفر ${index + 1}`;
             });
 
-            // إرجاع مخرجات الـ Stream والبدائل مجهزة بالكامل
+            // ✅ إرجاع مخرجات الـ Stream مباشرة
             return res.json({
                 id_live: liveData.id_live || id_live,
                 name: liveData.name || "",
@@ -931,7 +940,11 @@ app.get("/live_id/:id_live", async (req, res) => {
             });
         }
 
-        // 4. إذا وصلنا إلى هنا، فهذا يعني أن الـ urlVal ليس "1" (أي وجدنا رابطاً توجيهياً صالحاً)
+        // ═══════════════════════════════════════════
+        // الخطوة 2: إذا لم يكن "1"، نكمل المعالجة العادية
+        // ═══════════════════════════════════════════
+        console.log(`✅ الرابط ليس "1"، متابعة المعالجة العادية...`);
+
         // 🎯 الفحص الذكي: هل هو مباشر أم يحتاج Double Redirect
         let isDirectStream = false;
         let actualUrlObj = {};
@@ -984,7 +997,6 @@ app.get("/live_id/:id_live", async (req, res) => {
         res.status(500).json({ error: true, message: error.message });
     }
 });
-
 
 
 
