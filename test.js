@@ -439,7 +439,7 @@ app.get("/channels", async (req, res) => {
 });
 
 // ==========================================
-// مسار /stream (محافظاً على الهيكل تماماً + الكاش والفرز)
+// مسار /stream (بالهيكل الشامل المطلوب تماماً)
 // ==========================================
 const DEFAULT_USER_AGENT = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/149.0.0.0 Safari/537.36";
 
@@ -513,8 +513,8 @@ app.get("/stream", async (req, res) => {
             }
         }
 
-        // 4. معالجة وتجهيز النتائج الخام لكل سيرفر
-        let allServerResults = [];
+        // 4. معالجة السيرفرات وفك تشفير الـ redirect أو تنسيق المباشر
+        let parsedStreams = [];
 
         for (const item of rawStreams) {
             let serverPayload = null;
@@ -568,10 +568,7 @@ app.get("/stream", async (req, res) => {
 
                 serverPayload = {
                     "result": 0,
-                    "message": {
-                        "en": "operation succeeded",
-                        "ar": "تمت العملية بنجاح"
-                    },
+                    "message": { "en": "operation succeeded", "ar": "تمت العملية بنجاح" },
                     "data": {
                         "url": innerUrlString,
                         "agent": "advanced"
@@ -579,48 +576,72 @@ app.get("/stream", async (req, res) => {
                 };
             }
 
-            if (serverPayload) {
-                allServerResults.push(serverPayload);
+            // 5. تفكيك بيانات الرابط الداخلي وتركيبها بالشكل المطلوب تماماً
+            if (serverPayload && serverPayload.data) {
+                let rawUrlField = serverPayload.data.url || "";
+                let streamDetails = {};
+
+                try {
+                    streamDetails = typeof rawUrlField === 'string' && rawUrlField.trim().startsWith('{')
+                        ? JSON.parse(rawUrlField)
+                        : { url: rawUrlField };
+                } catch (e) {
+                    streamDetails = { url: rawUrlField };
+                }
+
+                let streamObj = {
+                    server_name: "temp",
+                    url: streamDetails.url || "",
+                    agent: serverPayload.data.agent || "advanced"
+                };
+
+                if (streamDetails.mediatype) streamObj.mediatype = streamDetails.mediatype;
+                if (streamDetails.description) streamObj.description = streamDetails.description;
+                if (streamDetails.acceptSSL) streamObj.acceptSSL = streamDetails.acceptSSL;
+                if (streamDetails.drm) streamObj.drm = streamDetails.drm;
+                streamObj.headers = streamDetails.headers || { "User-Agent": DEFAULT_USER_AGENT };
+
+                parsedStreams.push(streamObj);
             }
         }
 
-        // 🎯 5. الفرز الذكي حسب الأولوية (.mpd أولاً، ثم .m3u8، ثم البقية) بناءً على الرابط الداخلي
-        allServerResults.sort((a, b) => {
-            const extractUrl = (obj) => {
-                try {
-                    const raw = obj?.data?.url || "";
-                    if (typeof raw === 'string' && raw.startsWith('{')) {
-                        return JSON.parse(raw).url || "";
-                    }
-                    return raw;
-                } catch (e) {
-                    return "";
-                }
-            };
-
-            const urlA = extractUrl(a).toLowerCase();
-            const urlB = extractUrl(b).toLowerCase();
+        // 🎯 6. الفرز الذكي حسب الأولوية (.mpd أولاً، ثم .m3u8، ثم البقية)
+        parsedStreams.sort((a, b) => {
+            const urlA = (a.url || "").toLowerCase();
+            const urlB = (b.url || "").toLowerCase();
 
             const getPriority = (url) => {
                 if (!url) return 4;
-                if (url.includes(".mpd")) return 1;  // MPD في المقدمة
-                if (url.includes(".m3u8")) return 2; // M3U8 ثانياً
-                return 3;                            // البقية
+                if (url.includes(".mpd")) return 1;
+                if (url.includes(".m3u8")) return 2;
+                return 3;
             };
 
             return getPriority(urlA) - getPriority(urlB);
         });
 
-        // 6. حفظ النتيجة في الكاش وإرجاعها بنفس الهيكل تماماً
-        appCache.set(cacheKey, allServerResults);
-        res.json(allServerResults);
+        // 🎯 7. التسمية التسلسلية (سيرفر 1، سيرفر 2، ...)
+        parsedStreams.forEach((stream, index) => {
+            stream.server_name = `سيرفر ${index + 1}`;
+        });
+
+        // 8. بناء الهيكل النهائي المطلوب
+        const finalResponse = {
+            id_live: liveData.id_live || id_live,
+            name: liveData.name || "",
+            img_url: liveData.img_url || "",
+            streams: parsedStreams
+        };
+
+        // 9. تخزين النتيجة في الكاش وإرجاعها
+        appCache.set(cacheKey, finalResponse);
+        res.json(finalResponse);
 
     } catch (error) { 
         console.error(`❌ خطأ في مسار /stream:`, error.message);
         res.status(500).json({ error: true, message: error.message }); 
     }
 });
-
 // ==========================================
 // 2. مسار GET: جلب الرد مفكوك التشفير (مع الكاش)
 // ==========================================
