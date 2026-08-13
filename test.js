@@ -600,9 +600,6 @@ app.get("/stream", async (req, res) => {
     }
 });
 
-// ==========================================
-// مسار /double_redirect (الذكي - يمنع خطأ انتهاء الجلسة)
-// ==========================================
 app.get("/double_redirect", async (req, res) => {
     try {
         const id_live = req.query.id_live;
@@ -615,11 +612,11 @@ app.get("/double_redirect", async (req, res) => {
         const baseUrl = `${req.protocol}://${req.get("host")}`;
         const serverIndex = parseInt(s, 10);
 
-        // التحديث الذكي: يجلب البيانات ويحدث الكاش فوراً إذا كان فارغاً!
+        // جلب البيانات من الكاش (أو تحديثها تلقائياً)
         let cachedServers = await getOrFetchStreams(id_live, baseUrl);
 
         if (!cachedServers || !cachedServers[serverIndex]) {
-            return res.status(404).json({ error: true, message: "السيرفر المطلوب غير موجود أو غير متاح." });
+            return res.status(404).json({ error: true, message: "السيرفر المطلوب غير موجود." });
         }
 
         const serverData = cachedServers[serverIndex];
@@ -629,15 +626,23 @@ app.get("/double_redirect", async (req, res) => {
             return res.status(400).json({ error: true, message: "هذا السيرفر ليس من نوع double_redirect." });
         }
 
+        // استخراج الرابط والهيدرز الضرورية (مثل Referer)
         const urlObj = JSON.parse(originalUrlString);
         const target_url = urlObj.url;
-        const customHeaders = urlObj.headers || {};
+        const incomingHeaders = urlObj.headers || {};
         
-        if (!customHeaders['User-Agent']) {
-            customHeaders['User-Agent'] = DEFAULT_AGENT;
-        }
+        // دمج هيدرز التخفي مع الهيدرز المطلوبة من السيرفر
+        const customHeaders = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36",
+            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
+            "Accept-Language": "en-US,en;q=0.5",
+            "Connection": "keep-alive",
+            "Upgrade-Insecure-Requests": "1",
+            ...incomingHeaders // 💡 هنا يتم دمج Referer: https://dlhd.pk/ بشكل تلقائي
+        };
 
-        console.log(`⏳ جلب HTML للسيرفر [index: ${serverIndex}]: ${target_url}`);
+        console.log(`\n⏳ جلب HTML للسيرفر [${serverIndex}]: ${target_url}`);
+        console.log(`🔑 الهيدرز المستخدمة:`, incomingHeaders);
 
         let rawData = "";
         try {
@@ -648,12 +653,13 @@ app.get("/double_redirect", async (req, res) => {
             });
             rawData = resHtml.data;
         } catch (e) {
-            console.warn(`⚠️ تحذير: تعذر جلب الـ HTML بالكامل، السبب: ${e.message}`);
+            console.warn(`⚠️ تحذير: الموقع رفض الطلب (السبب: ${e.message})`);
             if (e.response && e.response.data) {
                 rawData = typeof e.response.data === 'string' ? e.response.data : JSON.stringify(e.response.data);
             }
         }
 
+        // بناء الطلب لفك التشفير
         const doubleRedirectPayload = {
             "user_id": "_82668_1785761367217_notloggedin.com_dramalive3",
             "device_id": "e603540e-ed93-47a3-bec6-a15f7f056604",
@@ -666,7 +672,7 @@ app.get("/double_redirect", async (req, res) => {
             "id": id_live,
             "url": originalUrlString,
             "agent": "double_redirect",
-            "raw_data": rawData
+            "raw_data": rawData // نمرر الـ HTML هنا
         };
 
         const encryptedDoubleBody = encryptAES(JSON.stringify(doubleRedirectPayload));
@@ -683,21 +689,24 @@ app.get("/double_redirect", async (req, res) => {
             responseType: "arraybuffer"
         });
 
+        if (!doubleRes.data || doubleRes.data.byteLength === 0) {
+            return res.status(502).json({ error: true, message: "سيرفر فك التشفير أعاد استجابة فارغة (الموقع المصدر محمي جداً)." });
+        }
+
         const decryptedDoubleStr = decryptAES(Buffer.from(doubleRes.data).toString("utf-8"));
         
         if (!decryptedDoubleStr) {
-            throw new Error("سيرفر فك التشفير أعاد استجابة فارغة.");
+            throw new Error("فشل فك تشفير الاستجابة من السيرفر.");
         }
 
         const finalPayload = JSON.parse(decryptedDoubleStr);
         res.json(finalPayload);
 
     } catch (error) {
-        console.error(`❌ خطأ في مسار /double_redirect:`, error.message);
+        console.error(`❌ خطأ عام في double_redirect:`, error.message);
         res.status(500).json({ error: true, message: error.message });
     }
 });
-
 // ==========================================
 // 🆕 المسار الذكي المدمج (مع الكاش المباشر لتوفير استدعاء الروابط الداخلية)
 // ==========================================
