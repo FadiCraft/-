@@ -2,7 +2,7 @@ const express = require("express");
 const axios = require("axios");
 const CryptoJS = require("crypto-js");
 const NodeCache = require("node-cache"); // 🆕 استدعاء مكتبة الكاش
-
+const https = require("https");
 const app = express();
 const PORT = process.env.PORT || 3000;
 
@@ -612,7 +612,7 @@ app.get("/double_redirect", async (req, res) => {
         const baseUrl = `${req.protocol}://${req.get("host")}`;
         const serverIndex = parseInt(s, 10);
 
-        // جلب البيانات من الكاش (أو تحديثها تلقائياً)
+        // جلب البيانات من الكاش أو السيرفر
         let cachedServers = await getOrFetchStreams(id_live, baseUrl);
 
         if (!cachedServers || !cachedServers[serverIndex]) {
@@ -623,56 +623,78 @@ app.get("/double_redirect", async (req, res) => {
         const originalUrlString = serverData.original_raw_url;
         
         if (!originalUrlString) {
-            return res.status(400).json({ error: true, message: "هذا السيرفر ليس من نوع double_redirect." });
+            return res.status(400).json({ error: true, message: "هذا السيرفر ليس من نوع double_redirect أو تنقصه البيانات الأصلية." });
         }
 
         // استخراج الرابط والهيدرز الضرورية (مثل Referer)
-        const urlObj = JSON.parse(originalUrlString);
-        const target_url = urlObj.url;
-        const incomingHeaders = urlObj.headers || {};
+        let target_url = "";
+        let incomingHeaders = {};
         
-        // دمج هيدرز التخفي مع الهيدرز المطلوبة من السيرفر
+        try {
+            const urlObj = typeof originalUrlString === "string" ? JSON.parse(originalUrlString) : originalUrlString;
+            target_url = urlObj.url;
+            incomingHeaders = urlObj.headers || {};
+        } catch (e) {
+            return res.status(400).json({ error: true, message: "فشل في تحليل بيانات الرابط الأصلي." });
+        }
+
+        if (!target_url) {
+            return res.status(400).json({ error: true, message: "الرابط الهدف فارغ." });
+        }
+
+        // دمج الهيدرز المطلوبة (مثل Referer) لضمان قبول الطلب من سيرفر البث
         const customHeaders = {
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36",
             "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
             "Accept-Language": "en-US,en;q=0.5",
             "Connection": "keep-alive",
             "Upgrade-Insecure-Requests": "1",
-            ...incomingHeaders // 💡 هنا يتم دمج Referer: https://dlhd.pk/ بشكل تلقائي
+            ...incomingHeaders
         };
 
         console.log(`\n⏳ جلب HTML للسيرفر [${serverIndex}]: ${target_url}`);
-        console.log(`🔑 الهيدرز المستخدمة:`, incomingHeaders);
 
         let rawData = "";
         try {
             const resHtml = await axios.get(target_url, { 
                 headers: customHeaders,
+                httpsAgent: httpsAgent, // 💡 السماح بتجاوز أخطاء SSL
                 timeout: 15000,
                 responseType: 'text' 
             });
-            rawData = resHtml.data;
+            rawData = typeof resHtml.data === "string" ? resHtml.data : JSON.stringify(resHtml.data);
         } catch (e) {
-            console.warn(`⚠️ تحذير: الموقع رفض الطلب (السبب: ${e.message})`);
+            console.warn(`⚠️ تحذير: تعذر جلب الـ HTML كطلب عادي (السبب: ${e.message})`);
             if (e.response && e.response.data) {
                 rawData = typeof e.response.data === 'string' ? e.response.data : JSON.stringify(e.response.data);
             }
         }
 
-        // بناء الطلب لفك التشفير
+        if (!rawData) {
+            return res.status(502).json({ error: true, message: "فشل جلب محتوى HTML الخاص بالقناة." });
+        }
+
+        // بناء الطلب لفك التشفير وإرساله إلى 1spbgmu
         const doubleRedirectPayload = {
             "user_id": "_82668_1785761367217_notloggedin.com_dramalive3",
             "device_id": "e603540e-ed93-47a3-bec6-a15f7f056604",
-            "device_api": "28", "version_name": "187", "language": "ar",
-            "timezone": "Europe/Istanbul", "device_type": "phone",
-            "KEY_ACTIVATED_TYPE": "232425", "store": "direct",
-            "isStoreVersion": false, "isPremium": false, "isCoupon_active": false, "hideAds": false,
+            "device_api": "28", 
+            "version_name": "187", 
+            "language": "ar",
+            "timezone": "Europe/Istanbul", 
+            "device_type": "phone",
+            "KEY_ACTIVATED_TYPE": "232425", 
+            "store": "direct",
+            "isStoreVersion": false, 
+            "isPremium": false, 
+            "isCoupon_active": false, 
+            "hideAds": false,
             "appCount": "{\"adsFailed\":584,\"adsLoaded\":277,\"adsShowed\":136,\"runCount\":63}",
             "mainServer": "http://main.eastgoessouth.online/api/live/livedrama/v13.0.0/",
             "id": id_live,
             "url": originalUrlString,
             "agent": "double_redirect",
-            "raw_data": rawData // نمرر الـ HTML هنا
+            "raw_data": rawData // تمرير كود الـ HTML المجلوب
         };
 
         const encryptedDoubleBody = encryptAES(JSON.stringify(doubleRedirectPayload));
@@ -690,7 +712,7 @@ app.get("/double_redirect", async (req, res) => {
         });
 
         if (!doubleRes.data || doubleRes.data.byteLength === 0) {
-            return res.status(502).json({ error: true, message: "سيرفر فك التشفير أعاد استجابة فارغة (الموقع المصدر محمي جداً)." });
+            return res.status(502).json({ error: true, message: "سيرفر فك التشفير أعاد استجابة فارغة." });
         }
 
         const decryptedDoubleStr = decryptAES(Buffer.from(doubleRes.data).toString("utf-8"));
