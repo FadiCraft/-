@@ -441,10 +441,12 @@ app.get("/channels", async (req, res) => {
 
 
 
+
+
 // ==========================================
-// مسار /stream (يدعم المعالجة المؤجلة للـ double_redirect بترميز Base64)
+// مسار /stream (يدعم المعالجة الذكية للـ double_redirect عبر الكاش)
 // ==========================================
-const DEFAULT_USER_AGENT = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/149.0.0.0 Safari/537.36";
+const DEFAULT_USER_AGENT = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/150.0.0.0 Safari/537.36";
 
 app.get("/stream", async (req, res) => {
     try {
@@ -459,7 +461,7 @@ app.get("/stream", async (req, res) => {
         // مفتاح الكاش الخاص بهذه القناة
         const cacheKey = `stream_full_${id_live}`;
 
-        // التحقق ممّا إذا كانت النتيجة مخزنة مسبقاً في الكاش
+        // 1. التحقق ممّا إذا كانت النتيجة مخزنة مسبقاً في الكاش
         if (appCache.has(cacheKey)) {
             console.log(`⚡ [Cache Hit] تقديم سيرفرات القناة من الكاش: ${id_live}`);
             return res.json(appCache.get(cacheKey));
@@ -467,7 +469,7 @@ app.get("/stream", async (req, res) => {
 
         console.log(`📺 جلب ومعالجة كافة سيرفرات القناة: ${id_live}`);
 
-        // 1. جلب البيانات الأساسية للقناة من السيرفر الأول
+        // 2. جلب البيانات الأساسية للقناة من السيرفر الأول
         const postData = {
             "user_id": "_82668_1785761367217_notloggedin.com_dramalive3",
             "device_id": "e603540e-ed93-47a3-bec6-a15f7f056604",
@@ -496,7 +498,7 @@ app.get("/stream", async (req, res) => {
         const rawJson = JSON.parse(decryptedResponse);
         const liveData = rawJson.live || {};
 
-        // 2. تجميع كل السيرفرات الخام (الرئيسي + الاحتياطية)
+        // 3. تجميع كل السيرفرات الخام (الرئيسي + الاحتياطية)
         let rawStreams = [];
 
         if (liveData.url && liveData.url !== "empty") {
@@ -519,7 +521,7 @@ app.get("/stream", async (req, res) => {
             }
         }
 
-        // 3. التكرار على جميع السيرفرات وفك تشفيرها وتنسيقها بنفس الهيكل
+        // 4. التكرار على جميع السيرفرات وفك تشفيرها وتنسيقها
         let allServerResults = [];
 
         for (const item of rawStreams) {
@@ -554,17 +556,17 @@ app.get("/stream", async (req, res) => {
                     const decryptedStr = decryptAES(Buffer.from(redirectRes.data).toString("utf-8"));
                     const parsedRedirect = JSON.parse(decryptedStr);
 
-                    // 💡 التعديل الخاص بالـ double_redirect
+                    // 💡 التعديل الخاص بالـ double_redirect وتطبيق فكرة الفهرس (s)
                     if (parsedRedirect && parsedRedirect.data && parsedRedirect.data.agent === "double_redirect") {
-                        // أخذ النص الأصلي الذي يحتوي على الرابط والـ Headers
                         const originalUrlString = parsedRedirect.data.url; 
                         
-                        // تشفير النص بالكامل بـ Base64
-                        const b64Data = Buffer.from(originalUrlString).toString('base64');
+                        // 1. نحفظ النص الأصلي حرفياً في الكائن لاستخدامه لاحقاً من الكاش في مسار /double_redirect
+                        parsedRedirect.original_raw_url = originalUrlString;
                         
-                        // بناء رابط مسارنا الجديد
-                        const myNewUrl = `${baseUrl}/double_redirect?id_live=${encodeURIComponent(id_live)}&b64_url=${encodeURIComponent(b64Data)}`;
-
+                        // 2. نحدد رقم هذا السيرفر بناءً على طول المصفوفة الحالية
+                        const serverIndex = allServerResults.length;
+                        
+                        // 3. بناء الرابط البسيط
                         let innerObj = {};
                         try {
                             innerObj = JSON.parse(originalUrlString);
@@ -572,8 +574,9 @@ app.get("/stream", async (req, res) => {
                             innerObj = { url: originalUrlString };
                         }
                         
-                        // استبدال الرابط برابطنا فقط مع الإبقاء على نفس الهيكل الداخلي
-                        innerObj.url = myNewUrl;
+                        innerObj.url = `${baseUrl}/double_redirect?id_live=${encodeURIComponent(id_live)}&s=${serverIndex}`;
+                        
+                        // 4. تحديث الرابط الذي سيذهب للتطبيق
                         parsedRedirect.data.url = JSON.stringify(innerObj);
                     }
 
@@ -609,10 +612,10 @@ app.get("/stream", async (req, res) => {
             }
         }
 
-        // 🆕 حفظ النتيجة في الكاش
+        // 🆕 حفظ النتيجة في الكاش (ستتضمن original_raw_url للرجوع إليها)
         appCache.set(cacheKey, allServerResults);
 
-        // إرجاع السيرفرات داخل مصفوفة
+        // إرجاع السيرفرات للتطبيق
         res.json(allServerResults);
 
     } catch (error) { 
@@ -623,57 +626,67 @@ app.get("/stream", async (req, res) => {
 
 
 
+
+
+
+
 // ==========================================
-// مسار /double_redirect (النسخة المتطابقة مع طلبات السيرفر الأصلي)
+// مسار /double_redirect (يعتمد على الكاش ورقم السيرفر s)
 // ==========================================
 app.get("/double_redirect", async (req, res) => {
     try {
         const id_live = req.query.id_live;
-        const b64_url = req.query.b64_url;
+        const s = req.query.s;
 
-        if (!id_live || !b64_url) {
-            return res.status(400).json({ error: true, message: "يرجى إرسال id_live و b64_url" });
+        if (!id_live || s === undefined) {
+            return res.status(400).json({ error: true, message: "يرجى إرسال id_live ورقم السيرفر s" });
         }
 
-        // 1. فك تشفير Base64 لاستخراج كائن JSON النصي الأصلي
-        const originalUrlString = Buffer.from(b64_url, 'base64').toString('utf-8');
+        // 1. جلب البيانات الأصلية من الكاش بناءً على رقم السيرفر (s)
+        const cacheKey = `stream_full_${id_live}`;
+        const cachedServers = appCache.get(cacheKey);
+
+        if (!cachedServers || !cachedServers[s]) {
+            return res.status(404).json({ error: true, message: "انتهت صلاحية الجلسة، يرجى تحديث القناة للاتصال بالسيرفر مجدداً." });
+        }
+
+        // 2. استخراج النص الأصلي حرفياً كما جاء من السيرفر الأول
+        const serverData = cachedServers[s];
+        const originalUrlString = serverData.original_raw_url;
         
-        let urlObj = {};
-        try {
-            urlObj = JSON.parse(originalUrlString);
-        } catch (e) {
-            urlObj = { url: originalUrlString };
+        if (!originalUrlString) {
+            return res.status(400).json({ error: true, message: "هذا السيرفر لا يحتوي على بيانات double_redirect الأصلية." });
         }
 
+        // 3. استخراج الرابط والهيدرز لجلب الـ HTML
+        const urlObj = JSON.parse(originalUrlString);
         const target_url = urlObj.url;
         const customHeaders = urlObj.headers || {};
         
-        // التأكد من وجود User-Agent
         if (!customHeaders['User-Agent']) {
             customHeaders['User-Agent'] = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/150.0.0.0 Safari/537.36";
         }
 
-        console.log(`⏳ جلب HTML للسيرفر: ${target_url}`);
+        console.log(`⏳ جلب HTML للسيرفر [${s}]: ${target_url}`);
 
-        // 2. جلب محتوى الصفحة HTML مع تمرير الـ Headers (مثل Referer) لكي لا يتم حظرنا
+        // 4. جلب الـ HTML من سيرفر البث (مثل hamis...) باستخدام الهيدرز
         let rawData = "";
         try {
             const resHtml = await axios.get(target_url, { 
                 headers: customHeaders,
                 timeout: 15000,
-                responseType: 'text' // لضمان استلام النص كما هو بدون تحويلات خاطئة
+                responseType: 'text' 
             });
             rawData = resHtml.data;
         } catch (e) {
-            console.warn(`⚠️ تحذير: لم يتم جلب الـ HTML بنجاح، سيتم إرسال نص فارغ. السبب: ${e.message}`);
-            // بعض السيرفرات تعطي خطأ 403 ولكنها ترجع محتوى، لذلك نحاول استخراجه إن وجد
+            console.warn(`⚠️ تحذير: لم يتم جلب الـ HTML بالكامل، السبب: ${e.message}`);
             if (e.response && e.response.data) {
                 rawData = typeof e.response.data === 'string' ? e.response.data : JSON.stringify(e.response.data);
             }
         }
 
-        // 3. بناء الطلب بنفس الهيكل والبيانات التي يتوقعها السيرفر الأصلي
-        // ⚠️ ملاحظة هامة: نرسل originalUrlString بالكامل في حقل url وليس الرابط فقط
+        // 5. بناء الطلب تماماً كما يتوقعه سيرفر DramaLive
+        // نمرر originalUrlString في حقل url دون لمس حرف واحد فيه!
         const doubleRedirectPayload = {
             "user_id": "_82668_1785761367217_notloggedin.com_dramalive3",
             "device_id": "e603540e-ed93-47a3-bec6-a15f7f056604",
@@ -684,14 +697,14 @@ app.get("/double_redirect", async (req, res) => {
             "appCount": "{\"adsFailed\":584,\"adsLoaded\":277,\"adsShowed\":136,\"runCount\":63}",
             "mainServer": "http://main.eastgoessouth.online/api/live/livedrama/v13.0.0/",
             "id": id_live,
-            "url": originalUrlString, 
+            "url": originalUrlString, // السر لنجاح فك التشفير
             "agent": "double_redirect",
             "raw_data": rawData
         };
 
         const encryptedDoubleBody = encryptAES(JSON.stringify(doubleRedirectPayload));
         
-        // 4. إرسال الطلب لسيرفر فك التشفير
+        // 6. إرسال الطلب لفك التشفير والحصول على الرابط النهائي
         const doubleRes = await axios.post("http://redirect.1spbgmu.com/redirect/getLiveByDoubleRedirect", encryptedDoubleBody, {
             headers: { 
                 "Content-Type": "application/json; charset=utf-8", 
@@ -704,113 +717,21 @@ app.get("/double_redirect", async (req, res) => {
             responseType: "arraybuffer"
         });
 
-        // 5. فك التشفير عن الاستجابة النهائية وإرجاعها
         const decryptedDoubleStr = decryptAES(Buffer.from(doubleRes.data).toString("utf-8"));
         
         if (!decryptedDoubleStr) {
-            throw new Error("سيرفر فك التشفير أعاد استجابة فارغة (تأكد من صلاحية الرابط أو الـ Headers).");
+            throw new Error("سيرفر فك التشفير أعاد استجابة فارغة. تأكد من سلامة الـ HTML.");
         }
 
         const finalPayload = JSON.parse(decryptedDoubleStr);
         
-        // إرجاع النتيجة (سيظهر فيها رابط m3u8 النهائي و agent: advanced)
+        // إرجاع الرابط النهائي للتطبيق ليعمل مباشرة
         res.json(finalPayload);
 
     } catch (error) {
         console.error(`❌ خطأ في مسار /double_redirect:`, error.message);
         res.status(500).json({ error: true, message: error.message });
     }
-});
-
-// ==========================================
-// 2. مسار GET: جلب الرد مفكوك التشفير (مع الكاش)
-// ==========================================
-app.get("/get-redirect-data", async (req, res) => {
-    try {
-        const id_live = req.query.id_live;
-        if (!id_live) return res.status(400).json({ error: true, message: "يرجى إرسال id_live في الرابط" });
-
-        const cacheKey = `redirect_get_${id_live}`;
-        
-        // 🆕 التحقق من الكاش
-        if (appCache.has(cacheKey)) {
-            return res.json(appCache.get(cacheKey));
-        }
-
-        console.log(`🔍 [GET] جلب الرابط الأساسي لقناة: ${id_live}`);
-
-        const streamsPostData = {
-            "user_id": "_82668_1785761367217_notloggedin.com_dramalive3",
-            "device_id": "e603540e-ed93-47a3-bec6-a15f7f056604",
-            "device_api": "28", "version_name": "187", "language": "ar",
-            "timezone": "Europe/Istanbul", "device_type": "phone",
-            "KEY_ACTIVATED_TYPE": "232425", "store": "direct",
-            "mainServer": "http://main.eastgoessouth.online/api/live/livedrama/v13.0.0/",
-            "type": "tv", "id_live": id_live, "id": id_live, "live_id": id_live, "channel_id": id_live
-        };
-        
-        const encryptedStreamBody = encryptAES(JSON.stringify(streamsPostData));
-        const streamRes = await axios.post("http://live.1spbgmu.com/api/live/livedrama/v13.0.0/getLiveAllStreamsById", encryptedStreamBody, {
-            headers: { "Content-Type": "text/plain", "User-Agent": "Dalvik/2.1.0 (Linux; U; Android 9; SM-S908E Build/TP1A.220624.014)", "Host": "live.1spbgmu.com", "Connection": "Keep-Alive" },
-            responseType: "arraybuffer", timeout: 15000
-        });
-        
-        const decryptedStreamRes = decryptAES(Buffer.from(streamRes.data).toString("utf-8"));
-        const streamJson = JSON.parse(decryptedStreamRes);
-        const url = streamJson.live?.url;
-
-        if (!url || url === "empty") {
-            return res.status(404).json({ error: true, message: "لم يتم العثور على رابط أساسي لهذه القناة" });
-        }
-
-        let result = await sendRequest(id_live, url, "redirect", "", "getLiveByRedirect");
-        let responseData = result.decrypted_response;
-        let returnedUrl = responseData?.data?.url || "";
-
-        let isDirectStream = false;
-        let actualUrlObj = {};
-        let actualUrl = returnedUrl;
-        let actualHeaders = {};
-
-        try {
-            actualUrlObj = JSON.parse(returnedUrl);
-            actualUrl = actualUrlObj.url || returnedUrl;
-            actualHeaders = actualUrlObj.headers || {};
-        } catch(e) {}
-
-        const isGateway = actualUrl.includes("token.") || actualUrl.includes("?url=") || actualUrl.includes(".LS.V2");
-        const hasStreamExt = actualUrl.includes(".m3u8") || actualUrl.includes(".mpd");
-
-        if (hasStreamExt && !isGateway && returnedUrl !== "1") {
-            isDirectStream = true;
-        }
-
-        if (!isDirectStream && returnedUrl !== "1") {
-            console.log(`🔄 [GET] الرابط غير مباشر، جاري تجهيز الخطوة الوسيطة...`);
-            let rawData = "";
-
-            if (actualUrl.includes("token.easybroadcast.io")) {
-                try {
-                    const tokenRes = await axios.get(actualUrl, { headers: actualHeaders });
-                    if (tokenRes.data && typeof tokenRes.data === 'object') {
-                        rawData = Object.keys(tokenRes.data).map(key => `${encodeURIComponent(key)}=${encodeURIComponent(tokenRes.data[key])}`).join('&');
-                    } else if (typeof tokenRes.data === 'string') {
-                        rawData = tokenRes.data;
-                    }
-                } catch (err) {}
-            } else if (result.encrypted_response) {
-                rawData = result.encrypted_response.trim();
-            }
-
-            const nextAgent = "double_redirect";
-            result = await sendRequest(id_live, returnedUrl, nextAgent, rawData, "getLiveByDoubleRedirect");
-        }
-
-        // 🆕 حفظ في الكاش
-        appCache.set(cacheKey, result.decrypted_response);
-        res.json(result.decrypted_response);
-
-    } catch (error) { res.status(500).json({ error: true, message: error.message }); }
 });
 
 // ==========================================
