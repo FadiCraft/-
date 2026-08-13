@@ -568,7 +568,6 @@ app.get("/stream", async (req, res) => {
 
                     // --- الطلب الثاني في حال كان double_redirect ---
                     if (currentAgent === "double_redirect") {
-                        // جلب محتوى الـ HTML للصفحة الوسيطة لإرساله في raw_data
                         try {
                             let parsedObj = JSON.parse(currentUrl);
                             let fetchHeaders = parsedObj.headers || {};
@@ -593,7 +592,7 @@ app.get("/stream", async (req, res) => {
                             "id": id_live,
                             "url": currentUrl,
                             "agent": "double_redirect",
-                            "raw_data": rawData // تمرير الـ HTML ضمن raw_data
+                            "raw_data": rawData
                         };
 
                         const encryptedDoubleBody = encryptAES(JSON.stringify(doubleRedirectPayload));
@@ -615,7 +614,7 @@ app.get("/stream", async (req, res) => {
 
                 } catch (err) {
                     console.error(`❌ خطأ في فك تشفير سيرفر التوجيه:`, err.message);
-                    continue; // تجاوز السيرفر في حال الفشل
+                    continue;
                 }
             } else {
                 let innerUrlString = item.url;
@@ -653,16 +652,23 @@ app.get("/stream", async (req, res) => {
                     streamDetails = { url: rawUrlField };
                 }
 
+                // === بناء كائن السيرفر ليطابق الهيكل المطلوب ===
                 let streamObj = {
-                    server_name: "temp",
+                    server_name: "temp", // سيتم تحديثه في الخطوة رقم 7
                     url: streamDetails.url || "",
-                    agent: serverPayload.data.agent || "advanced"
+                    agent: serverPayload.data.agent || streamDetails.agent || "advanced"
                 };
 
+                // إضافة الحقول بشكل دقيق لتطابق الهيكل
                 if (streamDetails.mediatype) streamObj.mediatype = streamDetails.mediatype;
                 if (streamDetails.description) streamObj.description = streamDetails.description;
-                if (streamDetails.acceptSSL) streamObj.acceptSSL = streamDetails.acceptSSL;
-                if (streamDetails.drm) streamObj.drm = streamDetails.drm;
+                
+                streamObj.acceptSSL = streamDetails.acceptSSL || "1";
+                
+                if (streamDetails.drm) {
+                    streamObj.drm = streamDetails.drm;
+                }
+
                 streamObj.headers = streamDetails.headers || { "User-Agent": DEFAULT_USER_AGENT };
 
                 parsedStreams.push(streamObj);
@@ -699,6 +705,8 @@ app.get("/stream", async (req, res) => {
 
         // 9. تخزين النتيجة في الكاش وإرجاعها
         appCache.set(cacheKey, finalResponse);
+        
+        // إرجاع النتيجة
         res.json(finalResponse);
 
     } catch (error) { 
@@ -706,7 +714,6 @@ app.get("/stream", async (req, res) => {
         res.status(500).json({ error: true, message: error.message }); 
     }
 });
-
 
 
 
