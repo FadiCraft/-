@@ -442,7 +442,7 @@ app.get("/channels", async (req, res) => {
 
 
 // ==========================================
-// مسار /stream (معدل ليدعم المعالجة المؤجلة للـ double_redirect)
+// مسار /stream (يدعم المعالجة المؤجلة للـ double_redirect بترميز Base64)
 // ==========================================
 const DEFAULT_USER_AGENT = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/149.0.0.0 Safari/537.36";
 
@@ -453,13 +453,13 @@ app.get("/stream", async (req, res) => {
             return res.status(400).json({ error: true, message: "يرجى إرسال id_live" });
         }
 
-        // رابط السيرفر الحالي ديناميكياً (ليعمل على localhost أو Render تلقائياً)
+        // تحديد الرابط الأساسي للسيرفر الخاص بك (ديناميكياً)
         const baseUrl = `${req.protocol}://${req.get("host")}`;
 
         // مفتاح الكاش الخاص بهذه القناة
         const cacheKey = `stream_full_${id_live}`;
 
-        // التحقق من الكاش
+        // التحقق ممّا إذا كانت النتيجة مخزنة مسبقاً في الكاش
         if (appCache.has(cacheKey)) {
             console.log(`⚡ [Cache Hit] تقديم سيرفرات القناة من الكاش: ${id_live}`);
             return res.json(appCache.get(cacheKey));
@@ -519,7 +519,7 @@ app.get("/stream", async (req, res) => {
             }
         }
 
-        // 3. التكرار على السيرفرات وفحص الـ redirect فقط
+        // 3. التكرار على جميع السيرفرات وفك تشفيرها وتنسيقها بنفس الهيكل
         let allServerResults = [];
 
         for (const item of rawStreams) {
@@ -554,21 +554,26 @@ app.get("/stream", async (req, res) => {
                     const decryptedStr = decryptAES(Buffer.from(redirectRes.data).toString("utf-8"));
                     const parsedRedirect = JSON.parse(decryptedStr);
 
-                    // 💡 التعديل هنا: إذا كان السيرفر يتطلب double_redirect، نغير الرابط ليوجه لمسارنا الجديد
+                    // 💡 التعديل الخاص بالـ double_redirect
                     if (parsedRedirect && parsedRedirect.data && parsedRedirect.data.agent === "double_redirect") {
+                        // أخذ النص الأصلي الذي يحتوي على الرابط والـ Headers
+                        const originalUrlString = parsedRedirect.data.url; 
+                        
+                        // تشفير النص بالكامل بـ Base64
+                        const b64Data = Buffer.from(originalUrlString).toString('base64');
+                        
+                        // بناء رابط مسارنا الجديد
+                        const myNewUrl = `${baseUrl}/double_redirect?id_live=${encodeURIComponent(id_live)}&b64_url=${encodeURIComponent(b64Data)}`;
+
                         let innerObj = {};
                         try {
-                            innerObj = JSON.parse(parsedRedirect.data.url);
+                            innerObj = JSON.parse(originalUrlString);
                         } catch (e) {
-                            innerObj = { url: parsedRedirect.data.url };
+                            innerObj = { url: originalUrlString };
                         }
-
-                        const targetUrl = innerObj.url;
                         
-                        // استبدال رابط الـ URL برابط المسار الجديد لدينا
-                        innerObj.url = `${baseUrl}/double_redirect?id_live=${encodeURIComponent(id_live)}&target_url=${encodeURIComponent(targetUrl)}`;
-                        
-                        // إعادة تعيين الـ url داخل data ليكون بنفس الهيكل المطلوب
+                        // استبدال الرابط برابطنا فقط مع الإبقاء على نفس الهيكل الداخلي
+                        innerObj.url = myNewUrl;
                         parsedRedirect.data.url = JSON.stringify(innerObj);
                     }
 
@@ -577,7 +582,7 @@ app.get("/stream", async (req, res) => {
                     console.error(`❌ خطأ في فك تشفير سيرفر redirect:`, err.message);
                 }
             } else {
-                // السيرفرات العادية المباشرة
+                // معالجة السيرفرات المباشرة لتبقى بنفس الهيكل تماماً
                 let innerUrlString = item.url;
                 if (!innerUrlString.startsWith("{")) {
                     innerUrlString = JSON.stringify({
@@ -604,10 +609,10 @@ app.get("/stream", async (req, res) => {
             }
         }
 
-        // حفظ النتيجة في الكاش
+        // 🆕 حفظ النتيجة في الكاش
         appCache.set(cacheKey, allServerResults);
 
-        // إرجاع الاستجابة
+        // إرجاع السيرفرات داخل مصفوفة
         res.json(allServerResults);
 
     } catch (error) { 
@@ -618,35 +623,57 @@ app.get("/stream", async (req, res) => {
 
 
 
-
-
 // ==========================================
-// مسار /double_redirect (يتم استدعاؤه عند النقر على السيرفر فقط)
+// مسار /double_redirect (النسخة المتطابقة مع طلبات السيرفر الأصلي)
 // ==========================================
 app.get("/double_redirect", async (req, res) => {
     try {
         const id_live = req.query.id_live;
-        const target_url = req.query.target_url;
+        const b64_url = req.query.b64_url;
 
-        if (!id_live || !target_url) {
-            return res.status(400).json({ error: true, message: "يرجى إرسال id_live و target_url" });
+        if (!id_live || !b64_url) {
+            return res.status(400).json({ error: true, message: "يرجى إرسال id_live و b64_url" });
         }
 
-        console.log(`⏳ [Double Redirect On-Demand] معالجة الرابط عند الطلب: ${target_url}`);
+        // 1. فك تشفير Base64 لاستخراج كائن JSON النصي الأصلي
+        const originalUrlString = Buffer.from(b64_url, 'base64').toString('utf-8');
+        
+        let urlObj = {};
+        try {
+            urlObj = JSON.parse(originalUrlString);
+        } catch (e) {
+            urlObj = { url: originalUrlString };
+        }
 
-        // 1. جلب محتوى الصفحة HTML / Raw Data
+        const target_url = urlObj.url;
+        const customHeaders = urlObj.headers || {};
+        
+        // التأكد من وجود User-Agent
+        if (!customHeaders['User-Agent']) {
+            customHeaders['User-Agent'] = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/150.0.0.0 Safari/537.36";
+        }
+
+        console.log(`⏳ جلب HTML للسيرفر: ${target_url}`);
+
+        // 2. جلب محتوى الصفحة HTML مع تمرير الـ Headers (مثل Referer) لكي لا يتم حظرنا
         let rawData = "";
         try {
-            let resHtml = await axios.get(target_url, { 
-                timeout: 10000,
-                headers: { "User-Agent": DEFAULT_USER_AGENT }
+            const resHtml = await axios.get(target_url, { 
+                headers: customHeaders,
+                timeout: 15000,
+                responseType: 'text' // لضمان استلام النص كما هو بدون تحويلات خاطئة
             });
-            rawData = typeof resHtml.data === 'string' ? resHtml.data : JSON.stringify(resHtml.data);
+            rawData = resHtml.data;
         } catch (e) {
-            console.warn(`⚠️ لم يتم جلب الـ HTML بنجاح، سيتم التمرير بنص فارغ:`, e.message);
+            console.warn(`⚠️ تحذير: لم يتم جلب الـ HTML بنجاح، سيتم إرسال نص فارغ. السبب: ${e.message}`);
+            // بعض السيرفرات تعطي خطأ 403 ولكنها ترجع محتوى، لذلك نحاول استخراجه إن وجد
+            if (e.response && e.response.data) {
+                rawData = typeof e.response.data === 'string' ? e.response.data : JSON.stringify(e.response.data);
+            }
         }
 
-        // 2. بناء طلب الـ Double Redirect وإرساله للتشفير/فك التشفير
+        // 3. بناء الطلب بنفس الهيكل والبيانات التي يتوقعها السيرفر الأصلي
+        // ⚠️ ملاحظة هامة: نرسل originalUrlString بالكامل في حقل url وليس الرابط فقط
         const doubleRedirectPayload = {
             "user_id": "_82668_1785761367217_notloggedin.com_dramalive3",
             "device_id": "e603540e-ed93-47a3-bec6-a15f7f056604",
@@ -654,15 +681,17 @@ app.get("/double_redirect", async (req, res) => {
             "timezone": "Europe/Istanbul", "device_type": "phone",
             "KEY_ACTIVATED_TYPE": "232425", "store": "direct",
             "isStoreVersion": false, "isPremium": false, "isCoupon_active": false, "hideAds": false,
-            "appCount": "{\"adsFailed\":496,\"adsLoaded\":251,\"adsShowed\":121,\"runCount\":58}",
+            "appCount": "{\"adsFailed\":584,\"adsLoaded\":277,\"adsShowed\":136,\"runCount\":63}",
             "mainServer": "http://main.eastgoessouth.online/api/live/livedrama/v13.0.0/",
             "id": id_live,
-            "url": target_url,
+            "url": originalUrlString, 
             "agent": "double_redirect",
             "raw_data": rawData
         };
 
         const encryptedDoubleBody = encryptAES(JSON.stringify(doubleRedirectPayload));
+        
+        // 4. إرسال الطلب لسيرفر فك التشفير
         const doubleRes = await axios.post("http://redirect.1spbgmu.com/redirect/getLiveByDoubleRedirect", encryptedDoubleBody, {
             headers: { 
                 "Content-Type": "application/json; charset=utf-8", 
@@ -675,10 +704,16 @@ app.get("/double_redirect", async (req, res) => {
             responseType: "arraybuffer"
         });
 
-        // 3. فك التشفير عن الاستجابة النهائية وإرجاعها بنفس الهيكل
+        // 5. فك التشفير عن الاستجابة النهائية وإرجاعها
         const decryptedDoubleStr = decryptAES(Buffer.from(doubleRes.data).toString("utf-8"));
-        const finalPayload = JSON.parse(decryptedDoubleStr);
+        
+        if (!decryptedDoubleStr) {
+            throw new Error("سيرفر فك التشفير أعاد استجابة فارغة (تأكد من صلاحية الرابط أو الـ Headers).");
+        }
 
+        const finalPayload = JSON.parse(decryptedDoubleStr);
+        
+        // إرجاع النتيجة (سيظهر فيها رابط m3u8 النهائي و agent: advanced)
         res.json(finalPayload);
 
     } catch (error) {
@@ -686,8 +721,6 @@ app.get("/double_redirect", async (req, res) => {
         res.status(500).json({ error: true, message: error.message });
     }
 });
-
-
 
 // ==========================================
 // 2. مسار GET: جلب الرد مفكوك التشفير (مع الكاش)
