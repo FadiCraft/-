@@ -13,7 +13,7 @@ app.use(express.urlencoded({ extended: true }));
 // 🆕 إعداد نظام الكاش
 // ==========================================
 // المدة الافتراضية للكاش هي 300 ثانية (5 دقائق)، ويتم تنظيف الكاش المنتهي كل 60 ثانية
-const appCache = new NodeCache({ stdTTL: 300, checkperiod: 60 });
+const appCache = new NodeCache({ stdTTL: 3, checkperiod: 60 });
 
 const KEY = CryptoJS.enc.Utf8.parse("0123456789abcdef");
 const IV = CryptoJS.enc.Utf8.parse("fedcba9876543210");
