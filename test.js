@@ -581,154 +581,317 @@ async function getOrFetchStreams(id_live, baseUrl) {
 }
 
 // ==========================================
-// مسار /stream (المحدث والمختصر)
+
+// مسار /stream (مع إضافة نظام الكاش)
+
 // ==========================================
+
+const DEFAULT_USER_AGENT = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/149.0.0.0 Safari/537.36";
+
+
+
 app.get("/stream", async (req, res) => {
+
     try {
+
         const id_live = req.query.id_live;
+
         if (!id_live) {
+
             return res.status(400).json({ error: true, message: "يرجى إرسال id_live" });
+
         }
 
-        const baseUrl = `${req.protocol}://${req.get("host")}`;
-        const allServerResults = await getOrFetchStreams(id_live, baseUrl);
 
-        res.json(allServerResults);
-    } catch (error) { 
-        console.error(`❌ خطأ في مسار /stream:`, error.message);
-        res.status(500).json({ error: true, message: error.message }); 
-    }
-});
 
-app.get("/double_redirect", async (req, res) => {
-    try {
-        const id_live = req.query.id_live;
-        const s = req.query.s;
+        // مفتاح الكاش الخاص بهذه القناة
 
-        if (!id_live || s === undefined) {
-            return res.status(400).json({ error: true, message: "يرجى إرسال id_live ورقم السيرفر s" });
+        const cacheKey = `stream_full_${id_live}`;
+
+
+
+        // التحقق ممّا إذا كانت النتيجة مخزنة مسبقاً في الكاش
+
+        if (appCache.has(cacheKey)) {
+
+            console.log(`⚡ [Cache Hit] تقديم سيرفرات القناة من الكاش: ${id_live}`);
+
+            return res.json(appCache.get(cacheKey));
+
         }
 
-        const baseUrl = `${req.protocol}://${req.get("host")}`;
-        const serverIndex = parseInt(s, 10);
 
-        // جلب البيانات من الكاش أو السيرفر
-        let cachedServers = await getOrFetchStreams(id_live, baseUrl);
 
-        if (!cachedServers || !cachedServers[serverIndex]) {
-            return res.status(404).json({ error: true, message: "السيرفر المطلوب غير موجود." });
-        }
+        console.log(`📺 جلب ومعالجة كافة سيرفرات القناة: ${id_live}`);
 
-        const serverData = cachedServers[serverIndex];
-        const originalUrlString = serverData.original_raw_url;
-        
-        if (!originalUrlString) {
-            return res.status(400).json({ error: true, message: "هذا السيرفر ليس من نوع double_redirect أو تنقصه البيانات الأصلية." });
-        }
 
-        // استخراج الرابط والهيدرز الضرورية (مثل Referer)
-        let target_url = "";
-        let incomingHeaders = {};
-        
-        try {
-            const urlObj = typeof originalUrlString === "string" ? JSON.parse(originalUrlString) : originalUrlString;
-            target_url = urlObj.url;
-            incomingHeaders = urlObj.headers || {};
-        } catch (e) {
-            return res.status(400).json({ error: true, message: "فشل في تحليل بيانات الرابط الأصلي." });
-        }
 
-        if (!target_url) {
-            return res.status(400).json({ error: true, message: "الرابط الهدف فارغ." });
-        }
+        // 1. جلب البيانات الأساسية للقناة من السيرفر الأول
 
-        // دمج الهيدرز المطلوبة (مثل Referer) لضمان قبول الطلب من سيرفر البث
-        const customHeaders = {
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36",
-            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
-            "Accept-Language": "en-US,en;q=0.5",
-            "Connection": "keep-alive",
-            "Upgrade-Insecure-Requests": "1",
-            ...incomingHeaders
-        };
+        const postData = {
 
-        console.log(`\n⏳ جلب HTML للسيرفر [${serverIndex}]: ${target_url}`);
-
-        let rawData = "";
-        try {
-            const resHtml = await axios.get(target_url, { 
-                headers: customHeaders,
-                httpsAgent: httpsAgent, // 💡 السماح بتجاوز أخطاء SSL
-                timeout: 15000,
-                responseType: 'text' 
-            });
-            rawData = typeof resHtml.data === "string" ? resHtml.data : JSON.stringify(resHtml.data);
-        } catch (e) {
-            console.warn(`⚠️ تحذير: تعذر جلب الـ HTML كطلب عادي (السبب: ${e.message})`);
-            if (e.response && e.response.data) {
-                rawData = typeof e.response.data === 'string' ? e.response.data : JSON.stringify(e.response.data);
-            }
-        }
-
-        if (!rawData) {
-            return res.status(502).json({ error: true, message: "فشل جلب محتوى HTML الخاص بالقناة." });
-        }
-
-        // بناء الطلب لفك التشفير وإرساله إلى 1spbgmu
-        const doubleRedirectPayload = {
             "user_id": "_82668_1785761367217_notloggedin.com_dramalive3",
+
             "device_id": "e603540e-ed93-47a3-bec6-a15f7f056604",
-            "device_api": "28", 
-            "version_name": "187", 
-            "language": "ar",
-            "timezone": "Europe/Istanbul", 
-            "device_type": "phone",
-            "KEY_ACTIVATED_TYPE": "232425", 
-            "store": "direct",
-            "isStoreVersion": false, 
-            "isPremium": false, 
-            "isCoupon_active": false, 
-            "hideAds": false,
-            "appCount": "{\"adsFailed\":584,\"adsLoaded\":277,\"adsShowed\":136,\"runCount\":63}",
+
+            "device_api": "28", "version_name": "187", "language": "ar",
+
+            "timezone": "Europe/Istanbul", "device_type": "phone",
+
+            "KEY_ACTIVATED_TYPE": "232425", "store": "direct",
+
+            "isStoreVersion": false, "isPremium": false, "isCoupon_active": false, "hideAds": false,
+
+            "appCount": "{\"adsFailed\":468,\"adsLoaded\":240,\"adsShowed\":116,\"runCount\":54}",
+
             "mainServer": "http://main.eastgoessouth.online/api/live/livedrama/v13.0.0/",
-            "id": id_live,
-            "url": originalUrlString,
-            "agent": "double_redirect",
-            "raw_data": rawData // تمرير كود الـ HTML المجلوب
+
+            "type": "tv", "id_live": id_live, "id": id_live, "live_id": id_live, "channel_id": id_live
+
         };
 
-        const encryptedDoubleBody = encryptAES(JSON.stringify(doubleRedirectPayload));
-        
-        const doubleRes = await axios.post("http://redirect.1spbgmu.com/redirect/getLiveByDoubleRedirect", encryptedDoubleBody, {
+
+
+        const encryptedBody = encryptAES(JSON.stringify(postData));
+
+        const response = await axios.post("http://live.1spbgmu.com/api/live/livedrama/v13.0.0/getLiveAllStreamsById", encryptedBody, {
+
             headers: { 
-                "Content-Type": "application/json; charset=utf-8", 
+
+                "Content-Type": "text/plain", 
+
                 "User-Agent": "Dalvik/2.1.0 (Linux; U; Android 9; SM-S908E Build/TP1A.220624.014)", 
-                "Host": "redirect.1spbgmu.com", 
-                "Connection": "Keep-Alive",
-                "Accept-Encoding": "gzip"
+
+                "Host": "live.1spbgmu.com", 
+
+                "Connection": "Keep-Alive" 
+
             },
+
             timeout: 15000, 
-            responseType: "arraybuffer"
+
+            responseType: "arraybuffer" 
+
         });
 
-        if (!doubleRes.data || doubleRes.data.byteLength === 0) {
-            return res.status(502).json({ error: true, message: "سيرفر فك التشفير أعاد استجابة فارغة." });
+
+
+        const decryptedResponse = decryptAES(Buffer.from(response.data).toString("utf-8"));
+
+        const rawJson = JSON.parse(decryptedResponse);
+
+        const liveData = rawJson.live || {};
+
+
+
+        // 2. تجميع كل السيرفرات الخام (الرئيسي + الاحتياطية)
+
+        let rawStreams = [];
+
+
+
+        if (liveData.url && liveData.url !== "empty") {
+
+            rawStreams.push({ url: liveData.url, agent: liveData.agent || "" });
+
         }
 
-        const decryptedDoubleStr = decryptAES(Buffer.from(doubleRes.data).toString("utf-8"));
-        
-        if (!decryptedDoubleStr) {
-            throw new Error("فشل فك تشفير الاستجابة من السيرفر.");
+
+
+        if (liveData.backup) {
+
+            const backupParts = liveData.backup.split("-;-");
+
+            for (const part of backupParts) {
+
+                const trimmedPart = part.trim();
+
+                if (!trimmedPart) continue;
+
+                
+
+                const subParts = trimmedPart.split("--");
+
+                const linkData = subParts[0] ? subParts[0].trim() : "";
+
+                const agentData = subParts[1] ? subParts[1].trim() : "";
+
+                
+
+                if (linkData && linkData !== "empty") {
+
+                    rawStreams.push({ url: linkData, agent: agentData });
+
+                }
+
+            }
+
         }
 
-        const finalPayload = JSON.parse(decryptedDoubleStr);
-        res.json(finalPayload);
 
-    } catch (error) {
-        console.error(`❌ خطأ عام في double_redirect:`, error.message);
-        res.status(500).json({ error: true, message: error.message });
+
+        // 3. التكرار على جميع السيرفرات وفك تشفيرها وتنسيقها بنفس الهيكل بالضبط
+
+        let allServerResults = [];
+
+
+
+        for (const item of rawStreams) {
+
+            if (item.agent === "redirect") {
+
+                try {
+
+                    const redirectPayload = {
+
+                        "user_id": "_82668_1785761367217_notloggedin.com_dramalive3",
+
+                        "device_id": "e603540e-ed93-47a3-bec6-a15f7f056604",
+
+                        "device_api": "28", "version_name": "187", "language": "ar",
+
+                        "timezone": "Europe/Istanbul", "device_type": "phone",
+
+                        "KEY_ACTIVATED_TYPE": "232425", "store": "direct",
+
+                        "isStoreVersion": false, "isPremium": false, "isCoupon_active": false, "hideAds": false,
+
+                        "appCount": "{\"adsFailed\":468,\"adsLoaded\":240,\"adsShowed\":116,\"runCount\":54}",
+
+                        "mainServer": "http://main.eastgoessouth.online/api/live/livedrama/v13.0.0/",
+
+                        "id": id_live,
+
+                        "url": item.url,
+
+                        "agent": "redirect"
+
+                    };
+
+
+
+                    const encryptedRedirectBody = encryptAES(JSON.stringify(redirectPayload));
+
+                    const redirectRes = await axios.post("http://redirect.1spbgmu.com/redirect/getLiveByRedirect", encryptedRedirectBody, {
+
+                        headers: { 
+
+                            "Content-Type": "text/plain", 
+
+                            "User-Agent": "Dalvik/2.1.0 (Linux; U; Android 9; SM-S908E Build/TP1A.220624.014)", 
+
+                            "Host": "redirect.1spbgmu.com", 
+
+                            "Connection": "Keep-Alive" 
+
+                        },
+
+                        timeout: 15000, 
+
+                        responseType: "arraybuffer"
+
+                    });
+
+
+
+                    // فك التشفير واستخراج الكائن الداخلي كما هو
+
+                    const decryptedStr = decryptAES(Buffer.from(redirectRes.data).toString("utf-8"));
+
+                    const parsedRedirect = JSON.parse(decryptedStr);
+
+
+
+                    allServerResults.push(parsedRedirect);
+
+                } catch (err) {
+
+                    console.error(`❌ خطأ في فك تشفير سيرفر redirect:`, err.message);
+
+                }
+
+            } else {
+
+                // إذا كان السيرفر مباشر وليس redirect، نقوم بتنسيقه ليكون بنفس الهيكل تماماً
+
+                let innerUrlString = item.url;
+
+                if (!innerUrlString.startsWith("{")) {
+
+                    innerUrlString = JSON.stringify({
+
+                        "url": item.url,
+
+                        "agent": item.agent || DEFAULT_USER_AGENT,
+
+                        "acceptSSL": "1",
+
+                        "headers": {
+
+                            "User-Agent": item.agent || DEFAULT_USER_AGENT
+
+                        }
+
+                    });
+
+                }
+
+
+
+                allServerResults.push({
+
+                    "result": 0,
+
+                    "message": {
+
+                        "en": "operation succeeded",
+
+                        "ar": "تمت العملية بنجاح"
+
+                    },
+
+                    "data": {
+
+                        "url": innerUrlString,
+
+                        "agent": "advanced"
+
+                    }
+
+                });
+
+            }
+
+        }
+
+
+
+        // 🆕 حفظ النتيجة في الكاش (المدة الافتراضية 300 ثانية أو 5 دقائق كما تم إعدادها مسبقاً)
+
+        appCache.set(cacheKey, allServerResults);
+
+
+
+        // إرجاع كافة السيرفرات داخل مصفوفة واحدة متسلسلة بنفس الهيكل المطلوب
+
+        res.json(allServerResults);
+
+
+
+    } catch (error) { 
+
+        console.error(`❌ خطأ في مسار /stream:`, error.message);
+
+        res.status(500).json({ error: true, message: error.message }); 
+
     }
+
 });
+
+
+
+
+
 // ==========================================
 // 🆕 المسار الذكي المدمج (مع الكاش المباشر لتوفير استدعاء الروابط الداخلية)
 // ==========================================
