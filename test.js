@@ -447,7 +447,7 @@ app.get("/stream", async (req, res) => {
     try {
         const id_live = req.query.id_live;
         if (!id_live) {
-            return res.status(400).json({ error: true, message: "يرجى إرسال id_live" });
+            return res.status(400).json({ error: true, message: "" });
         }
 
         // مفتاح الكاش الخاص بهذه القناة
@@ -589,16 +589,20 @@ app.get("/stream", async (req, res) => {
                     streamDetails = { url: rawUrlField };
                 }
 
+                // تجهيز كائن السيرفر كما في الهيكل المطلوب
                 let streamObj = {
                     server_name: "temp",
                     url: streamDetails.url || "",
-                    agent: serverPayload.data.agent || "advanced"
+                    agent: serverPayload.data.agent || streamDetails.agent || "advanced"
                 };
 
+                // إضافة الخصائص الاختيارية فقط إذا كانت موجودة
                 if (streamDetails.mediatype) streamObj.mediatype = streamDetails.mediatype;
                 if (streamDetails.description) streamObj.description = streamDetails.description;
                 if (streamDetails.acceptSSL) streamObj.acceptSSL = streamDetails.acceptSSL;
                 if (streamDetails.drm) streamObj.drm = streamDetails.drm;
+                
+                // إضافة الهيدر (مع إعطاء قيمة افتراضية للـ User-Agent إذا لم يتوفر)
                 streamObj.headers = streamDetails.headers || { "User-Agent": DEFAULT_USER_AGENT };
 
                 parsedStreams.push(streamObj);
