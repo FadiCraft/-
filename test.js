@@ -444,10 +444,145 @@ app.get("/channels", async (req, res) => {
 
 
 // ==========================================
-// مسار /stream (يدعم المعالجة الذكية للـ double_redirect عبر الكاش)
+// دالة مساعدة: جلب وتحديث كاش السيرفرات تلقائياً (التحديث الذكي)
 // ==========================================
-const DEFAULT_USER_AGENT = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/150.0.0.0 Safari/537.36";
+async function getOrFetchStreams(id_live, baseUrl) {
+    const cacheKey = `stream_full_${id_live}`;
+    
+    if (appCache.has(cacheKey)) {
+        return appCache.get(cacheKey);
+    }
 
+    console.log(`🔄 [Auto-Fetch] جلب وتحديث كاش السيرفرات للقناة: ${id_live}`);
+
+    const postData = {
+        "user_id": "_82668_1785761367217_notloggedin.com_dramalive3",
+        "device_id": "e603540e-ed93-47a3-bec6-a15f7f056604",
+        "device_api": "28", "version_name": "187", "language": "ar",
+        "timezone": "Europe/Istanbul", "device_type": "phone",
+        "KEY_ACTIVATED_TYPE": "232425", "store": "direct",
+        "isStoreVersion": false, "isPremium": false, "isCoupon_active": false, "hideAds": false,
+        "appCount": "{\"adsFailed\":468,\"adsLoaded\":240,\"adsShowed\":116,\"runCount\":54}",
+        "mainServer": "http://main.eastgoessouth.online/api/live/livedrama/v13.0.0/",
+        "type": "tv", "id_live": id_live, "id": id_live, "live_id": id_live, "channel_id": id_live
+    };
+
+    const encryptedBody = encryptAES(JSON.stringify(postData));
+    const response = await axios.post("http://live.1spbgmu.com/api/live/livedrama/v13.0.0/getLiveAllStreamsById", encryptedBody, {
+        headers: { 
+            "Content-Type": "text/plain", 
+            "User-Agent": "Dalvik/2.1.0 (Linux; U; Android 9; SM-S908E Build/TP1A.220624.014)", 
+            "Host": "live.1spbgmu.com", 
+            "Connection": "Keep-Alive" 
+        },
+        timeout: 15000, 
+        responseType: "arraybuffer" 
+    });
+
+    const decryptedResponse = decryptAES(Buffer.from(response.data).toString("utf-8"));
+    const rawJson = JSON.parse(decryptedResponse);
+    const liveData = rawJson.live || {};
+
+    let rawStreams = [];
+    if (liveData.url && liveData.url !== "empty") {
+        rawStreams.push({ url: liveData.url, agent: liveData.agent || "" });
+    }
+
+    if (liveData.backup) {
+        const backupParts = liveData.backup.split("-;-");
+        for (const part of backupParts) {
+            const trimmedPart = part.trim();
+            if (!trimmedPart) continue;
+            const subParts = trimmedPart.split("--");
+            const linkData = subParts[0] ? subParts[0].trim() : "";
+            const agentData = subParts[1] ? subParts[1].trim() : "";
+            if (linkData && linkData !== "empty") {
+                rawStreams.push({ url: linkData, agent: agentData });
+            }
+        }
+    }
+
+    let allServerResults = [];
+
+    for (const item of rawStreams) {
+        if (item.agent === "redirect") {
+            try {
+                const redirectPayload = {
+                    "user_id": "_82668_1785761367217_notloggedin.com_dramalive3",
+                    "device_id": "e603540e-ed93-47a3-bec6-a15f7f056604",
+                    "device_api": "28", "version_name": "187", "language": "ar",
+                    "timezone": "Europe/Istanbul", "device_type": "phone",
+                    "KEY_ACTIVATED_TYPE": "232425", "store": "direct",
+                    "isStoreVersion": false, "isPremium": false, "isCoupon_active": false, "hideAds": false,
+                    "appCount": "{\"adsFailed\":468,\"adsLoaded\":240,\"adsShowed\":116,\"runCount\":54}",
+                    "mainServer": "http://main.eastgoessouth.online/api/live/livedrama/v13.0.0/",
+                    "id": id_live,
+                    "url": item.url,
+                    "agent": "redirect"
+                };
+
+                const encryptedRedirectBody = encryptAES(JSON.stringify(redirectPayload));
+                const redirectRes = await axios.post("http://redirect.1spbgmu.com/redirect/getLiveByRedirect", encryptedRedirectBody, {
+                    headers: { 
+                        "Content-Type": "text/plain", 
+                        "User-Agent": "Dalvik/2.1.0 (Linux; U; Android 9; SM-S908E Build/TP1A.220624.014)", 
+                        "Host": "redirect.1spbgmu.com", 
+                        "Connection": "Keep-Alive" 
+                    },
+                    timeout: 15000, 
+                    responseType: "arraybuffer"
+                });
+
+                const decryptedStr = decryptAES(Buffer.from(redirectRes.data).toString("utf-8"));
+                const parsedRedirect = JSON.parse(decryptedStr);
+
+                if (parsedRedirect && parsedRedirect.data && parsedRedirect.data.agent === "double_redirect") {
+                    const originalUrlString = parsedRedirect.data.url; 
+                    parsedRedirect.original_raw_url = originalUrlString;
+                    
+                    const serverIndex = allServerResults.length;
+                    
+                    let innerObj = {};
+                    try {
+                        innerObj = JSON.parse(originalUrlString);
+                    } catch (e) {
+                        innerObj = { url: originalUrlString };
+                    }
+                    
+                    innerObj.url = `${baseUrl}/double_redirect?id_live=${encodeURIComponent(id_live)}&s=${serverIndex}`;
+                    parsedRedirect.data.url = JSON.stringify(innerObj);
+                }
+
+                allServerResults.push(parsedRedirect);
+            } catch (err) {
+                console.error(`❌ خطأ في فك تشفير سيرفر redirect:`, err.message);
+            }
+        } else {
+            let innerUrlString = item.url;
+            if (!innerUrlString.startsWith("{")) {
+                innerUrlString = JSON.stringify({
+                    "url": item.url,
+                    "agent": item.agent || DEFAULT_AGENT,
+                    "acceptSSL": "1",
+                    "headers": { "User-Agent": item.agent || DEFAULT_AGENT }
+                });
+            }
+
+            allServerResults.push({
+                "result": 0,
+                "message": { "en": "operation succeeded", "ar": "تمت العملية بنجاح" },
+                "data": { "url": innerUrlString, "agent": "advanced" }
+            });
+        }
+    }
+
+    appCache.set(cacheKey, allServerResults);
+    return allServerResults;
+}
+
+// ==========================================
+// مسار /stream (المحدث والمختصر)
+// ==========================================
 app.get("/stream", async (req, res) => {
     try {
         const id_live = req.query.id_live;
@@ -455,183 +590,18 @@ app.get("/stream", async (req, res) => {
             return res.status(400).json({ error: true, message: "يرجى إرسال id_live" });
         }
 
-        // تحديد الرابط الأساسي للسيرفر الخاص بك (ديناميكياً)
         const baseUrl = `${req.protocol}://${req.get("host")}`;
+        const allServerResults = await getOrFetchStreams(id_live, baseUrl);
 
-        // مفتاح الكاش الخاص بهذه القناة
-        const cacheKey = `stream_full_${id_live}`;
-
-        // 1. التحقق ممّا إذا كانت النتيجة مخزنة مسبقاً في الكاش
-        if (appCache.has(cacheKey)) {
-            console.log(`⚡ [Cache Hit] تقديم سيرفرات القناة من الكاش: ${id_live}`);
-            return res.json(appCache.get(cacheKey));
-        }
-
-        console.log(`📺 جلب ومعالجة كافة سيرفرات القناة: ${id_live}`);
-
-        // 2. جلب البيانات الأساسية للقناة من السيرفر الأول
-        const postData = {
-            "user_id": "_82668_1785761367217_notloggedin.com_dramalive3",
-            "device_id": "e603540e-ed93-47a3-bec6-a15f7f056604",
-            "device_api": "28", "version_name": "187", "language": "ar",
-            "timezone": "Europe/Istanbul", "device_type": "phone",
-            "KEY_ACTIVATED_TYPE": "232425", "store": "direct",
-            "isStoreVersion": false, "isPremium": false, "isCoupon_active": false, "hideAds": false,
-            "appCount": "{\"adsFailed\":468,\"adsLoaded\":240,\"adsShowed\":116,\"runCount\":54}",
-            "mainServer": "http://main.eastgoessouth.online/api/live/livedrama/v13.0.0/",
-            "type": "tv", "id_live": id_live, "id": id_live, "live_id": id_live, "channel_id": id_live
-        };
-
-        const encryptedBody = encryptAES(JSON.stringify(postData));
-        const response = await axios.post("http://live.1spbgmu.com/api/live/livedrama/v13.0.0/getLiveAllStreamsById", encryptedBody, {
-            headers: { 
-                "Content-Type": "text/plain", 
-                "User-Agent": "Dalvik/2.1.0 (Linux; U; Android 9; SM-S908E Build/TP1A.220624.014)", 
-                "Host": "live.1spbgmu.com", 
-                "Connection": "Keep-Alive" 
-            },
-            timeout: 15000, 
-            responseType: "arraybuffer" 
-        });
-
-        const decryptedResponse = decryptAES(Buffer.from(response.data).toString("utf-8"));
-        const rawJson = JSON.parse(decryptedResponse);
-        const liveData = rawJson.live || {};
-
-        // 3. تجميع كل السيرفرات الخام (الرئيسي + الاحتياطية)
-        let rawStreams = [];
-
-        if (liveData.url && liveData.url !== "empty") {
-            rawStreams.push({ url: liveData.url, agent: liveData.agent || "" });
-        }
-
-        if (liveData.backup) {
-            const backupParts = liveData.backup.split("-;-");
-            for (const part of backupParts) {
-                const trimmedPart = part.trim();
-                if (!trimmedPart) continue;
-                
-                const subParts = trimmedPart.split("--");
-                const linkData = subParts[0] ? subParts[0].trim() : "";
-                const agentData = subParts[1] ? subParts[1].trim() : "";
-                
-                if (linkData && linkData !== "empty") {
-                    rawStreams.push({ url: linkData, agent: agentData });
-                }
-            }
-        }
-
-        // 4. التكرار على جميع السيرفرات وفك تشفيرها وتنسيقها
-        let allServerResults = [];
-
-        for (const item of rawStreams) {
-            if (item.agent === "redirect") {
-                try {
-                    const redirectPayload = {
-                        "user_id": "_82668_1785761367217_notloggedin.com_dramalive3",
-                        "device_id": "e603540e-ed93-47a3-bec6-a15f7f056604",
-                        "device_api": "28", "version_name": "187", "language": "ar",
-                        "timezone": "Europe/Istanbul", "device_type": "phone",
-                        "KEY_ACTIVATED_TYPE": "232425", "store": "direct",
-                        "isStoreVersion": false, "isPremium": false, "isCoupon_active": false, "hideAds": false,
-                        "appCount": "{\"adsFailed\":468,\"adsLoaded\":240,\"adsShowed\":116,\"runCount\":54}",
-                        "mainServer": "http://main.eastgoessouth.online/api/live/livedrama/v13.0.0/",
-                        "id": id_live,
-                        "url": item.url,
-                        "agent": "redirect"
-                    };
-
-                    const encryptedRedirectBody = encryptAES(JSON.stringify(redirectPayload));
-                    const redirectRes = await axios.post("http://redirect.1spbgmu.com/redirect/getLiveByRedirect", encryptedRedirectBody, {
-                        headers: { 
-                            "Content-Type": "text/plain", 
-                            "User-Agent": "Dalvik/2.1.0 (Linux; U; Android 9; SM-S908E Build/TP1A.220624.014)", 
-                            "Host": "redirect.1spbgmu.com", 
-                            "Connection": "Keep-Alive" 
-                        },
-                        timeout: 15000, 
-                        responseType: "arraybuffer"
-                    });
-
-                    const decryptedStr = decryptAES(Buffer.from(redirectRes.data).toString("utf-8"));
-                    const parsedRedirect = JSON.parse(decryptedStr);
-
-                    // 💡 التعديل الخاص بالـ double_redirect وتطبيق فكرة الفهرس (s)
-                    if (parsedRedirect && parsedRedirect.data && parsedRedirect.data.agent === "double_redirect") {
-                        const originalUrlString = parsedRedirect.data.url; 
-                        
-                        // 1. نحفظ النص الأصلي حرفياً في الكائن لاستخدامه لاحقاً من الكاش في مسار /double_redirect
-                        parsedRedirect.original_raw_url = originalUrlString;
-                        
-                        // 2. نحدد رقم هذا السيرفر بناءً على طول المصفوفة الحالية
-                        const serverIndex = allServerResults.length;
-                        
-                        // 3. بناء الرابط البسيط
-                        let innerObj = {};
-                        try {
-                            innerObj = JSON.parse(originalUrlString);
-                        } catch (e) {
-                            innerObj = { url: originalUrlString };
-                        }
-                        
-                        innerObj.url = `${baseUrl}/double_redirect?id_live=${encodeURIComponent(id_live)}&s=${serverIndex}`;
-                        
-                        // 4. تحديث الرابط الذي سيذهب للتطبيق
-                        parsedRedirect.data.url = JSON.stringify(innerObj);
-                    }
-
-                    allServerResults.push(parsedRedirect);
-                } catch (err) {
-                    console.error(`❌ خطأ في فك تشفير سيرفر redirect:`, err.message);
-                }
-            } else {
-                // معالجة السيرفرات المباشرة لتبقى بنفس الهيكل تماماً
-                let innerUrlString = item.url;
-                if (!innerUrlString.startsWith("{")) {
-                    innerUrlString = JSON.stringify({
-                        "url": item.url,
-                        "agent": item.agent || DEFAULT_USER_AGENT,
-                        "acceptSSL": "1",
-                        "headers": {
-                            "User-Agent": item.agent || DEFAULT_USER_AGENT
-                        }
-                    });
-                }
-
-                allServerResults.push({
-                    "result": 0,
-                    "message": {
-                        "en": "operation succeeded",
-                        "ar": "تمت العملية بنجاح"
-                    },
-                    "data": {
-                        "url": innerUrlString,
-                        "agent": "advanced"
-                    }
-                });
-            }
-        }
-
-        // 🆕 حفظ النتيجة في الكاش (ستتضمن original_raw_url للرجوع إليها)
-        appCache.set(cacheKey, allServerResults);
-
-        // إرجاع السيرفرات للتطبيق
         res.json(allServerResults);
-
     } catch (error) { 
         console.error(`❌ خطأ في مسار /stream:`, error.message);
         res.status(500).json({ error: true, message: error.message }); 
     }
 });
 
-
-
-
-
-
-
 // ==========================================
-// مسار /double_redirect (يعتمد على الكاش ورقم السيرفر s)
+// مسار /double_redirect (الذكي - يمنع خطأ انتهاء الجلسة)
 // ==========================================
 app.get("/double_redirect", async (req, res) => {
     try {
@@ -642,34 +612,33 @@ app.get("/double_redirect", async (req, res) => {
             return res.status(400).json({ error: true, message: "يرجى إرسال id_live ورقم السيرفر s" });
         }
 
-        // 1. جلب البيانات الأصلية من الكاش بناءً على رقم السيرفر (s)
-        const cacheKey = `stream_full_${id_live}`;
-        const cachedServers = appCache.get(cacheKey);
+        const baseUrl = `${req.protocol}://${req.get("host")}`;
+        const serverIndex = parseInt(s, 10);
 
-        if (!cachedServers || !cachedServers[s]) {
-            return res.status(404).json({ error: true, message: "انتهت صلاحية الجلسة، يرجى تحديث القناة للاتصال بالسيرفر مجدداً." });
+        // التحديث الذكي: يجلب البيانات ويحدث الكاش فوراً إذا كان فارغاً!
+        let cachedServers = await getOrFetchStreams(id_live, baseUrl);
+
+        if (!cachedServers || !cachedServers[serverIndex]) {
+            return res.status(404).json({ error: true, message: "السيرفر المطلوب غير موجود أو غير متاح." });
         }
 
-        // 2. استخراج النص الأصلي حرفياً كما جاء من السيرفر الأول
-        const serverData = cachedServers[s];
+        const serverData = cachedServers[serverIndex];
         const originalUrlString = serverData.original_raw_url;
         
         if (!originalUrlString) {
-            return res.status(400).json({ error: true, message: "هذا السيرفر لا يحتوي على بيانات double_redirect الأصلية." });
+            return res.status(400).json({ error: true, message: "هذا السيرفر ليس من نوع double_redirect." });
         }
 
-        // 3. استخراج الرابط والهيدرز لجلب الـ HTML
         const urlObj = JSON.parse(originalUrlString);
         const target_url = urlObj.url;
         const customHeaders = urlObj.headers || {};
         
         if (!customHeaders['User-Agent']) {
-            customHeaders['User-Agent'] = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/150.0.0.0 Safari/537.36";
+            customHeaders['User-Agent'] = DEFAULT_AGENT;
         }
 
-        console.log(`⏳ جلب HTML للسيرفر [${s}]: ${target_url}`);
+        console.log(`⏳ جلب HTML للسيرفر [index: ${serverIndex}]: ${target_url}`);
 
-        // 4. جلب الـ HTML من سيرفر البث (مثل hamis...) باستخدام الهيدرز
         let rawData = "";
         try {
             const resHtml = await axios.get(target_url, { 
@@ -679,14 +648,12 @@ app.get("/double_redirect", async (req, res) => {
             });
             rawData = resHtml.data;
         } catch (e) {
-            console.warn(`⚠️ تحذير: لم يتم جلب الـ HTML بالكامل، السبب: ${e.message}`);
+            console.warn(`⚠️ تحذير: تعذر جلب الـ HTML بالكامل، السبب: ${e.message}`);
             if (e.response && e.response.data) {
                 rawData = typeof e.response.data === 'string' ? e.response.data : JSON.stringify(e.response.data);
             }
         }
 
-        // 5. بناء الطلب تماماً كما يتوقعه سيرفر DramaLive
-        // نمرر originalUrlString في حقل url دون لمس حرف واحد فيه!
         const doubleRedirectPayload = {
             "user_id": "_82668_1785761367217_notloggedin.com_dramalive3",
             "device_id": "e603540e-ed93-47a3-bec6-a15f7f056604",
@@ -697,14 +664,13 @@ app.get("/double_redirect", async (req, res) => {
             "appCount": "{\"adsFailed\":584,\"adsLoaded\":277,\"adsShowed\":136,\"runCount\":63}",
             "mainServer": "http://main.eastgoessouth.online/api/live/livedrama/v13.0.0/",
             "id": id_live,
-            "url": originalUrlString, // السر لنجاح فك التشفير
+            "url": originalUrlString,
             "agent": "double_redirect",
             "raw_data": rawData
         };
 
         const encryptedDoubleBody = encryptAES(JSON.stringify(doubleRedirectPayload));
         
-        // 6. إرسال الطلب لفك التشفير والحصول على الرابط النهائي
         const doubleRes = await axios.post("http://redirect.1spbgmu.com/redirect/getLiveByDoubleRedirect", encryptedDoubleBody, {
             headers: { 
                 "Content-Type": "application/json; charset=utf-8", 
@@ -720,12 +686,10 @@ app.get("/double_redirect", async (req, res) => {
         const decryptedDoubleStr = decryptAES(Buffer.from(doubleRes.data).toString("utf-8"));
         
         if (!decryptedDoubleStr) {
-            throw new Error("سيرفر فك التشفير أعاد استجابة فارغة. تأكد من سلامة الـ HTML.");
+            throw new Error("سيرفر فك التشفير أعاد استجابة فارغة.");
         }
 
         const finalPayload = JSON.parse(decryptedDoubleStr);
-        
-        // إرجاع الرابط النهائي للتطبيق ليعمل مباشرة
         res.json(finalPayload);
 
     } catch (error) {
