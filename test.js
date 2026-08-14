@@ -580,8 +580,18 @@ async function getOrFetchStreams(id_live, baseUrl) {
     return allServerResults;
 }
 
+
+
+
+
+
+
+
+
+
+
 // ==========================================
-// مسار /stream (بالهيكل الشامل ويدعم double_redirect)
+// مسار /stream (بالهيكل الشامل ويدعم double_redirect مع الترقيم)
 // ==========================================
 const DEFAULT_USER_AGENT = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/149.0.0.0 Safari/537.36";
 
@@ -657,6 +667,7 @@ app.get("/stream", async (req, res) => {
 
         // 4. معالجة السيرفرات وتجهيز الهيكل النهائي
         let finalStreamsArray = [];
+        let serverCounter = 1; // 👈 إضافة عداد السيرفرات هنا
 
         for (const item of rawStreams) {
             let serverPayload = null;
@@ -707,7 +718,6 @@ app.get("/stream", async (req, res) => {
 
                     // --- الطلب الثاني في حال كان double_redirect ---
                     if (currentAgent === "double_redirect") {
-                        // جلب محتوى الـ HTML للصفحة الوسيطة لإرساله في raw_data
                         try {
                             let parsedObj = JSON.parse(currentUrl);
                             let fetchHeaders = parsedObj.headers || {};
@@ -732,7 +742,7 @@ app.get("/stream", async (req, res) => {
                             "id": id_live,
                             "url": currentUrl,
                             "agent": "double_redirect",
-                            "raw_data": rawData // تمرير الـ HTML ضمن raw_data
+                            "raw_data": rawData 
                         };
 
                         const encryptedDoubleBody = encryptAES(JSON.stringify(doubleRedirectPayload));
@@ -754,7 +764,7 @@ app.get("/stream", async (req, res) => {
 
                 } catch (err) {
                     console.error(`❌ خطأ في فك تشفير سيرفر التوجيه:`, err.message);
-                    continue; // تجاوز السيرفر في حال الفشل
+                    continue; 
                 }
             } else {
                 // روابط البث المباشر العادية
@@ -780,9 +790,18 @@ app.get("/stream", async (req, res) => {
                 };
             }
 
-            // إضافة الهيكل المباشر للمصفوفة
+            // إضافة الهيكل المباشر للمصفوفة مع الترقيم
             if (serverPayload) {
+                // 👈 تعيين اسم السيرفر ورقمه داخل الـ payload
+                serverPayload.name = `سيرفر ${serverCounter}`; 
+                
+                // 👈 وإضافته أيضاً داخل الـ data لضمان قراءته بسهولة من التطبيقات
+                if(serverPayload.data) {
+                    serverPayload.data.name = `سيرفر ${serverCounter}`;
+                }
+
                 finalStreamsArray.push(serverPayload);
+                serverCounter++; // 👈 زيادة العداد للسيرفر التالي
             }
         }
 
@@ -795,6 +814,19 @@ app.get("/stream", async (req, res) => {
         res.status(500).json({ error: true, message: error.message }); 
     }
 });
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
