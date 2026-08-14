@@ -1074,7 +1074,7 @@ app.get("/live_id/:id", async (req, res) => {
 });
 
 // ==========================================
-// مسار مشترك: جلب بيانات الـ Redirect (مع الكاش)
+// مسار مشترك: جلب بيانات الـ Redirect (مع دعم double_redirect والكاش)
 // ==========================================
 app.get("/last/:id_live", async (req, res) => {
     try {
@@ -1113,8 +1113,32 @@ app.get("/last/:id_live", async (req, res) => {
 
         if (!url || url === "empty") return res.status(404).json({ error: true, message: "لم يتم العثور على رابط أساسي لهذه القناة" });
 
+        // الخطوة الأولى: طلب getLiveByRedirect
         const redirectResult = await sendRequest(id_live, url, "redirect", "", "getLiveByRedirect");
-        const redirectData = redirectResult.decrypted_response;
+        let redirectData = redirectResult.decrypted_response;
+
+        // 🆕 المعالجة الذكية في حال كان الرد يحتوي على agent = double_redirect
+        if (redirectData && redirectData.data && redirectData.data.agent === "double_redirect") {
+            console.log(`🔄 [last] تم اكتشاف double_redirect، جاري جلب الصفحة الوسيطة واستدعاء getLiveByDoubleRedirect...`);
+            const currentUrl = redirectData.data.url;
+            let rawData = "";
+
+            try {
+                let parsedObj = JSON.parse(currentUrl);
+                let fetchHeaders = parsedObj.headers || {};
+                let resHtml = await axios.get(parsedObj.url, { headers: fetchHeaders, timeout: 10000 });
+                rawData = typeof resHtml.data === 'string' ? resHtml.data : JSON.stringify(resHtml.data);
+            } catch (e) {
+                try {
+                    let resHtml = await axios.get(currentUrl, { timeout: 10000 });
+                    rawData = typeof resHtml.data === 'string' ? resHtml.data : JSON.stringify(resHtml.data);
+                } catch (err) {}
+            }
+
+            // الخطوة الثانية: استدعاء getLiveByDoubleRedirect مع الـ raw_data
+            const doubleResult = await sendRequest(id_live, currentUrl, "double_redirect", rawData, "getLiveByDoubleRedirect");
+            redirectData = doubleResult.decrypted_response;
+        }
 
         let urlVal = "";
         if (redirectData && redirectData.data && redirectData.data.url) urlVal = redirectData.data.url.trim();
@@ -1161,7 +1185,6 @@ app.get("/last/:id_live", async (req, res) => {
 
     } catch (error) { res.status(500).json({ error: true, message: error.message }); }
 });
-
 // ==========================================
 // 4. مسار جلب المباريات (مع الكاش 5 دقائق)
 // ==========================================
