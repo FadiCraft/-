@@ -826,6 +826,191 @@ app.get("/stream", async (req, res) => {
 
 
 
+// ==========================================
+// 1. مسار POST: استخراج رد مفكوك التشفير (مع الكاش)
+// ==========================================
+app.post("/get-redirect-data", async (req, res) => {
+    try {
+        const id_live = req.body.id_live;
+        let url = req.body.url;
+        const agent = req.body.agent || "redirect";
+
+        if (!id_live) return res.status(400).json({ error: true, message: "يرجى إرسال id_live في الـ Body" });
+
+        const cacheKey = `redirect_post_${id_live}_${url || 'nourl'}`;
+        
+        // 🆕 التحقق من الكاش
+        if (appCache.has(cacheKey)) {
+            return res.json(appCache.get(cacheKey));
+        }
+
+        if (!url) {
+            const streamsPostData = {
+                "user_id": "_82668_1785761367217_notloggedin.com_dramalive3",
+                "device_id": "e603540e-ed93-47a3-bec6-a15f7f056604",
+                "device_api": "28", "version_name": "187", "language": "ar",
+                "timezone": "Europe/Istanbul", "device_type": "phone",
+                "KEY_ACTIVATED_TYPE": "232425", "store": "direct",
+                "mainServer": "http://main.eastgoessouth.online/api/live/livedrama/v13.0.0/",
+                "type": "tv", "id_live": id_live, "id": id_live, "live_id": id_live, "channel_id": id_live
+            };
+            
+            const encryptedStreamBody = encryptAES(JSON.stringify(streamsPostData));
+            const streamRes = await axios.post("http://live.1spbgmu.com/api/live/livedrama/v13.0.0/getLiveAllStreamsById", encryptedStreamBody, {
+                headers: { "Content-Type": "text/plain", "User-Agent": "Dalvik/2.1.0 (Linux; U; Android 9; SM-S908E Build/TP1A.220624.014)", "Host": "live.1spbgmu.com", "Connection": "Keep-Alive" },
+                responseType: "arraybuffer",
+                timeout: 15000
+            });
+            
+            const decryptedStreamRes = decryptAES(Buffer.from(streamRes.data).toString("utf-8"));
+            const streamJson = JSON.parse(decryptedStreamRes);
+            url = streamJson.live?.url;
+
+            if (!url || url === "empty") {
+                return res.status(404).json({ error: true, message: "لم يتم العثور على رابط أساسي لهذه القناة لإرساله" });
+            }
+        }
+
+        let result = await sendRequest(id_live, url, agent, "", "getLiveByRedirect");
+        let responseData = result.decrypted_response;
+        let returnedUrl = responseData?.data?.url || "";
+
+        let isDirectStream = false;
+        let actualUrlObj = {};
+        let actualUrl = returnedUrl;
+        let actualHeaders = {};
+
+        try {
+            actualUrlObj = JSON.parse(returnedUrl);
+            actualUrl = actualUrlObj.url || returnedUrl;
+            actualHeaders = actualUrlObj.headers || {};
+        } catch(e) {}
+
+        const isGateway = actualUrl.includes("token.") || actualUrl.includes("?url=") || actualUrl.includes(".LS.V2");
+        const hasStreamExt = actualUrl.includes(".m3u8") || actualUrl.includes(".mpd");
+
+        if (hasStreamExt && !isGateway && returnedUrl !== "1") {
+            isDirectStream = true;
+        }
+
+        if (!isDirectStream && returnedUrl !== "1") {
+            console.log(`🔄 [POST] الرابط غير مباشر، جاري تجهيز الخطوة الوسيطة...`);
+            let rawData = "";
+
+            if (actualUrl.includes("token.easybroadcast.io")) {
+                try {
+                    const tokenRes = await axios.get(actualUrl, { headers: actualHeaders });
+                    if (tokenRes.data && typeof tokenRes.data === 'object') {
+                        rawData = Object.keys(tokenRes.data).map(key => `${encodeURIComponent(key)}=${encodeURIComponent(tokenRes.data[key])}`).join('&');
+                    } else if (typeof tokenRes.data === 'string') {
+                        rawData = tokenRes.data;
+                    }
+                } catch (err) {}
+            } else if (result.encrypted_response) {
+                rawData = result.encrypted_response.trim();
+            }
+
+            const nextAgent = "double_redirect";
+            result = await sendRequest(id_live, returnedUrl, nextAgent, rawData, "getLiveByDoubleRedirect");
+        }
+
+        // 🆕 حفظ في الكاش
+        appCache.set(cacheKey, result.decrypted_response);
+        res.json(result.decrypted_response);
+
+    } catch (error) { res.status(500).json({ error: true, message: error.message }); }
+});
+
+// ==========================================
+// 2. مسار GET: جلب الرد مفكوك التشفير (مع الكاش)
+// ==========================================
+app.get("/get-redirect-data", async (req, res) => {
+    try {
+        const id_live = req.query.id_live;
+        if (!id_live) return res.status(400).json({ error: true, message: "يرجى إرسال id_live في الرابط" });
+
+        const cacheKey = `redirect_get_${id_live}`;
+        
+        // 🆕 التحقق من الكاش
+        if (appCache.has(cacheKey)) {
+            return res.json(appCache.get(cacheKey));
+        }
+
+        console.log(`🔍 [GET] جلب الرابط الأساسي لقناة: ${id_live}`);
+
+        const streamsPostData = {
+            "user_id": "_82668_1785761367217_notloggedin.com_dramalive3",
+            "device_id": "e603540e-ed93-47a3-bec6-a15f7f056604",
+            "device_api": "28", "version_name": "187", "language": "ar",
+            "timezone": "Europe/Istanbul", "device_type": "phone",
+            "KEY_ACTIVATED_TYPE": "232425", "store": "direct",
+            "mainServer": "http://main.eastgoessouth.online/api/live/livedrama/v13.0.0/",
+            "type": "tv", "id_live": id_live, "id": id_live, "live_id": id_live, "channel_id": id_live
+        };
+        
+        const encryptedStreamBody = encryptAES(JSON.stringify(streamsPostData));
+        const streamRes = await axios.post("http://live.1spbgmu.com/api/live/livedrama/v13.0.0/getLiveAllStreamsById", encryptedStreamBody, {
+            headers: { "Content-Type": "text/plain", "User-Agent": "Dalvik/2.1.0 (Linux; U; Android 9; SM-S908E Build/TP1A.220624.014)", "Host": "live.1spbgmu.com", "Connection": "Keep-Alive" },
+            responseType: "arraybuffer", timeout: 15000
+        });
+        
+        const decryptedStreamRes = decryptAES(Buffer.from(streamRes.data).toString("utf-8"));
+        const streamJson = JSON.parse(decryptedStreamRes);
+        const url = streamJson.live?.url;
+
+        if (!url || url === "empty") {
+            return res.status(404).json({ error: true, message: "لم يتم العثور على رابط أساسي لهذه القناة" });
+        }
+
+        let result = await sendRequest(id_live, url, "redirect", "", "getLiveByRedirect");
+        let responseData = result.decrypted_response;
+        let returnedUrl = responseData?.data?.url || "";
+
+        let isDirectStream = false;
+        let actualUrlObj = {};
+        let actualUrl = returnedUrl;
+        let actualHeaders = {};
+
+        try {
+            actualUrlObj = JSON.parse(returnedUrl);
+            actualUrl = actualUrlObj.url || returnedUrl;
+            actualHeaders = actualUrlObj.headers || {};
+        } catch(e) {}
+
+        const isGateway = actualUrl.includes("token.") || actualUrl.includes("?url=") || actualUrl.includes(".LS.V2");
+        const hasStreamExt = actualUrl.includes(".m3u8") || actualUrl.includes(".mpd");
+
+        if (hasStreamExt && !isGateway && returnedUrl !== "1") {
+            isDirectStream = true;
+        }
+
+        if (!isDirectStream && returnedUrl !== "1") {
+            console.log(`🔄 [GET] الرابط غير مباشر، جاري تجهيز الخطوة الوسيطة...`);
+            let rawData = "";
+
+            if (actualUrl.includes("token.easybroadcast.io")) {
+                try {
+                    const tokenRes = await axios.get(actualUrl, { headers: actualHeaders });
+                    if (tokenRes.data && typeof tokenRes.data === 'object') {
+                        rawData = Object.keys(tokenRes.data).map(key => `${encodeURIComponent(key)}=${encodeURIComponent(tokenRes.data[key])}`).join('&');
+                    } else if (typeof tokenRes.data === 'string') {
+                        rawData = tokenRes.data;
+                    }
+                } catch (err) {}
+            } else if (result.encrypted_response) {
+                rawData = result.encrypted_response.trim();
+            }
+
+            const nextAgent = "double_redirect";
+            result = await sendRequest(id_live, returnedUrl, nextAgent, rawData, "getLiveByDoubleRedirect");
+        }
+
+        // 🆕 حفظ في الكاش
+        appCache.set(cacheKey, result.decrypted_response);
+        res.json(result.decrypted_response);
+
+    } catch (error) { res.status(500).json({ error: true, message: error.message }); }
+});
 
 
 
