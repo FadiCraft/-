@@ -180,16 +180,14 @@ app.get('/api/search', async (req, res) => {
 
 
 
-
-
-// مسار استخراج بيانات القناة وفيديوهاتها - نسخة محسنة
-app.get('/api/channel', async (req, res) => {
+// ============ مسار استخراج بيانات القناة فقط ============
+app.get('/api/channel/info', async (req, res) => {
     const channelUrl = req.query.url;
     
     if (!channelUrl) {
         return res.json({ 
             error: "الرجاء إدخال رابط القناة",
-            example: "/api/channel?url=https://www.youtube.com/@IShowSpeed/videos"
+            example: "/api/channel/info?url=https://www.youtube.com/@IShowSpeed"
         });
     }
 
@@ -197,19 +195,14 @@ app.get('/api/channel', async (req, res) => {
         const response = await fetch(channelUrl, {
             headers: {
                 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-                'Accept-Language': 'ar,en-US;q=0.9,en;q=0.8',
-                'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
-                'Cache-Control': 'no-cache'
+                'Accept-Language': 'en-US,en;q=0.9',
+                'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8'
             }
         });
         
-        if (!response.ok) {
-            throw new Error(`HTTP error! status: ${response.status}`);
-        }
-        
         const html = await response.text();
         
-        // استخراج بيانات ytInitialData
+        // استخراج ytInitialData
         const match = html.match(/var ytInitialData = (.*?);<\/script>/);
         if (!match || !match[1]) {
             return res.json({ error: "لم يتم العثور على بيانات القناة" });
@@ -217,7 +210,6 @@ app.get('/api/channel', async (req, res) => {
 
         const jsonData = JSON.parse(match[1]);
         
-        // استخراج معلومات القناة
         let channelInfo = {
             name: "",
             handle: "",
@@ -230,10 +222,13 @@ app.get('/api/channel', async (req, res) => {
             social_links: []
         };
 
-        // استخراج فيديوهات القناة
-        let videos = [];
+        // استخراج اسم القناة والمقبض من الرابط أولاً
+        const handleMatch = channelUrl.match(/@([^\/]+)/);
+        if (handleMatch) {
+            channelInfo.handle = `@${handleMatch[1]}`;
+        }
 
-        // دالة مساعدة لاستخراج النص من عناصر مختلفة
+        // دالة لاستخراج النص
         function extractText(obj) {
             if (!obj) return "";
             if (typeof obj === 'string') return obj;
@@ -245,82 +240,112 @@ app.get('/api/channel', async (req, res) => {
             return "";
         }
 
-        // دالة البحث العميق في البيانات - نسخة محسنة
-        function searchDeep(obj, path = "") {
+        // البحث العميق عن معلومات القناة
+        function searchChannelInfo(obj, path = "") {
             if (Array.isArray(obj)) {
-                obj.forEach((item, index) => searchDeep(item, `${path}[${index}]`));
+                obj.forEach((item, index) => searchChannelInfo(item, `${path}[${index}]`));
             } else if (obj !== null && typeof obj === 'object') {
                 
-                // ========== استخراج معلومات القناة ==========
-                
-                // البحث عن عناصر header الخاصة بالقناة
-                if (path.includes("pageHeader") || path.includes("header")) {
+                // البحث عن header
+                if (path.includes("pageHeader") || path.includes("header") || path.includes("Header")) {
                     
-                    // استخراج الاسم (النمط الجديد)
-                    if (obj.dynamicTextViewModelH1 && !channelInfo.name) {
-                        const h1Text = extractText(obj.dynamicTextViewModelH1.ytAttributedStringHost || obj.dynamicTextViewModelH1);
-                        if (h1Text) channelInfo.name = h1Text;
+                    // استخراج العنوان
+                    if (obj.ytPageHeaderViewModelTitle || obj.dynamicTextViewModelH1 || obj.ytDynamicTextViewModel) {
+                        const titleObj = obj.ytPageHeaderViewModelTitle || obj.dynamicTextViewModelH1 || obj.ytDynamicTextViewModel;
                         
-                        // التحقق من التوثيق
-                        if (obj.dynamicTextViewModelH1.ariaLabel && obj.dynamicTextViewModelH1.ariaLabel.includes("Verified")) {
-                            channelInfo.verified = true;
+                        // البحث في الأعماق
+                        function findTitle(o) {
+                            if (!o) return "";
+                            if (typeof o === 'string') return o;
+                            if (o.content) return o.content;
+                            if (o.runs && Array.isArray(o.runs)) {
+                                return o.runs.map(r => r.text || "").join("");
+                            }
+                            if (o.ytAttributedStringHost) {
+                                return findTitle(o.ytAttributedStringHost);
+                            }
+                            if (o.dynamicTextViewModelH1) {
+                                return findTitle(o.dynamicTextViewModelH1);
+                            }
+                            if (o.ytDynamicTextViewModel) {
+                                return findTitle(o.ytDynamicTextViewModel);
+                            }
+                            // البحث في الخصائص
+                            for (let key in o) {
+                                if (typeof o[key] === 'object') {
+                                    const result = findTitle(o[key]);
+                                    if (result) return result;
+                                }
+                            }
+                            return "";
                         }
-                    }
-                    
-                    // استخراج الاسم (نمط آخر)
-                    if (obj.ytPageHeaderViewModelTitle && !channelInfo.name) {
-                        const titleObj = obj.ytPageHeaderViewModelTitle;
-                        if (titleObj.ytDynamicTextViewModel) {
-                            const text = extractText(titleObj.ytDynamicTextViewModel.dynamicTextViewModelH1 || titleObj.ytDynamicTextViewModel);
-                            if (text) channelInfo.name = text;
+                        
+                        const title = findTitle(titleObj);
+                        if (title && title !== "Verified" && !title.includes("@")) {
+                            channelInfo.name = title;
+                            
+                            // التحقق من التوثيق
+                            const titleStr = JSON.stringify(titleObj);
+                            if (titleStr.includes("Verified")) {
+                                channelInfo.verified = true;
+                            }
                         }
                     }
                     
                     // استخراج الصورة الرمزية
-                    if (!channelInfo.avatar) {
-                        // البحث عن صور avatar
-                        if (obj.ytSpecAvatarShapeAvatarSizeGiant) {
-                            const avatarImg = obj.ytSpecAvatarShapeAvatarSizeGiant.ytCoreImageHost || obj.ytSpecAvatarShapeAvatarSizeGiant.img;
-                            if (avatarImg && avatarImg.src) {
-                                channelInfo.avatar = avatarImg.src;
+                    const avatarObj = obj.ytDecoratedAvatarViewModel || obj.ytDecoratedAvatarViewModelHost;
+                    if (avatarObj) {
+                        function findImage(o, depth = 0) {
+                            if (!o || depth > 10) return "";
+                            if (o.src && (o.src.includes("yt3.googleusercontent") || o.src.includes("ggpht"))) {
+                                return o.src;
                             }
+                            if (o.url && (o.url.includes("yt3.googleusercontent") || o.url.includes("ggpht"))) {
+                                return o.url;
+                            }
+                            if (o.sources && Array.isArray(o.sources) && o.sources[0]?.url) {
+                                return o.sources[0].url;
+                            }
+                            for (let key in o) {
+                                if (typeof o[key] === 'object') {
+                                    const result = findImage(o[key], depth + 1);
+                                    if (result) return result;
+                                }
+                            }
+                            return "";
                         }
                         
-                        // نمط آخر للصورة
-                        if (obj.ytDecoratedAvatarViewModel) {
-                            const avatarObj = obj.ytDecoratedAvatarViewModel;
-                            if (avatarObj.avatar?.avatarViewModel?.image?.sources?.[0]?.url) {
-                                channelInfo.avatar = avatarObj.avatar.avatarViewModel.image.sources[0].url;
-                            }
+                        const avatar = findImage(avatarObj);
+                        if (avatar) {
+                            channelInfo.avatar = avatar;
                         }
                     }
                     
-                    // استخراج النصوص الوصفية (المشتركين، عدد الفيديوهات، المقبض)
-                    if (obj.ytContentMetadataViewModel || obj.ytContentMetadataViewModelHost) {
-                        const metadataObj = obj.ytContentMetadataViewModel || obj.ytContentMetadataViewModelHost;
-                        
-                        // البحث في الصفوف
-                        if (metadataObj.ytContentMetadataViewModelMetadataRow || metadataObj.metadataRows) {
-                            const rows = metadataObj.ytContentMetadataViewModelMetadataRow || metadataObj.metadataRows || [];
+                    // استخراج المشتركين وعدد الفيديوهات
+                    const metadataObj = obj.ytContentMetadataViewModel || obj.ytContentMetadataViewModelHost;
+                    if (metadataObj) {
+                        function findTexts(o, texts = [], depth = 0) {
+                            if (!o || depth > 10) return texts;
                             
-                            if (Array.isArray(rows)) {
-                                rows.forEach(row => {
-                                    const text = extractText(row.ytAttributedStringHost || row);
-                                    
-                                    if (text.startsWith("@") && !channelInfo.handle) {
-                                        channelInfo.handle = text;
-                                    } else if (text.includes("subscriber") && !channelInfo.subscribers) {
-                                        channelInfo.subscribers = text;
-                                    } else if (text.includes("video") && !channelInfo.videos_count) {
-                                        channelInfo.videos_count = text;
-                                    }
-                                });
+                            if (o.content && typeof o.content === 'string') {
+                                texts.push(o.content);
                             }
+                            if (o.runs && Array.isArray(o.runs)) {
+                                const text = o.runs.map(r => r.text || "").join("");
+                                if (text) texts.push(text);
+                            }
+                            
+                            for (let key in o) {
+                                if (typeof o[key] === 'object') {
+                                    findTexts(o[key], texts, depth + 1);
+                                }
+                            }
+                            return texts;
                         }
                         
-                        // البحث في النمط المسطح
-                        if (metadataObj.ytContentMetadataViewModelMetadataText) {
-                            const text = extractText(metadataObj.ytContentMetadataViewModelMetadataText);
+                        const allTexts = findTexts(metadataObj);
+                        
+                        allTexts.forEach(text => {
                             if (text.startsWith("@") && !channelInfo.handle) {
                                 channelInfo.handle = text;
                             } else if (text.includes("subscriber") && !channelInfo.subscribers) {
@@ -328,213 +353,266 @@ app.get('/api/channel', async (req, res) => {
                             } else if (text.includes("video") && !channelInfo.videos_count) {
                                 channelInfo.videos_count = text;
                             }
-                        }
+                        });
                     }
                     
                     // استخراج الوصف
-                    if (obj.ytDescriptionPreviewViewModel || obj.ytDescriptionPreviewViewModelHost) {
-                        const descObj = obj.ytDescriptionPreviewViewModel || obj.ytDescriptionPreviewViewModelHost;
-                        const descText = extractText(descObj.truncatedText?.truncatedTextContent?.ytAttributedStringHost || descObj);
-                        if (descText && descText !== "...more") {
-                            channelInfo.description = descText.replace("...more", "").trim();
+                    const descObj = obj.ytDescriptionPreviewViewModel || obj.ytDescriptionPreviewViewModelHost;
+                    if (descObj) {
+                        function findDescription(o, depth = 0) {
+                            if (!o || depth > 10) return "";
+                            if (o.content && typeof o.content === 'string' && o.content !== "...more") {
+                                return o.content;
+                            }
+                            if (o.runs && Array.isArray(o.runs)) {
+                                const text = o.runs.map(r => r.text || "").join("");
+                                if (text && text !== "...more") {
+                                    return text;
+                                }
+                            }
+                            for (let key in o) {
+                                if (typeof o[key] === 'object') {
+                                    const result = findDescription(o[key], depth + 1);
+                                    if (result && !result.includes("...more")) return result;
+                                }
+                            }
+                            return "";
                         }
+                        
+                        channelInfo.description = findDescription(descObj);
                     }
                     
                     // استخراج الروابط الاجتماعية
-                    if (obj.ytAttributionViewModel || obj.ytAttributionViewModelHost) {
-                        const attrObj = obj.ytAttributionViewModel || obj.ytAttributionViewModelHost;
-                        const attrText = extractText(attrObj.ytAttributedStringHost || attrObj);
-                        
-                        if (attrText && attrText.includes("http") && channelInfo.social_links.length < 10) {
-                            const linkMatch = attrText.match(/https?:\/\/[^\s]+/);
-                            if (linkMatch) {
-                                channelInfo.social_links.push({
-                                    platform: attrText.split(" ")[0] || "Link",
-                                    url: linkMatch[0]
+                    const attrObj = obj.ytAttributionViewModel || obj.ytAttributionViewModelHost;
+                    if (attrObj) {
+                        function findLinks(o, links = [], depth = 0) {
+                            if (!o || depth > 10) return links;
+                            
+                            if (o.url && typeof o.url === 'string' && o.url.includes('http')) {
+                                links.push({
+                                    platform: "Link",
+                                    url: o.url
                                 });
                             }
-                        }
-                    }
-                }
-                
-                // ========== استخراج الفيديوهات ==========
-                
-                // النمط القديم: videoRenderer
-                if (obj.videoRenderer && obj.videoRenderer.videoId) {
-                    const video = obj.videoRenderer;
-                    videos.push({
-                        id: video.videoId,
-                        title: extractText(video.title),
-                        video_url: `https://www.youtube.com/watch?v=${video.videoId}`,
-                        thumbnail: video.thumbnail?.thumbnails?.[video.thumbnail.thumbnails.length - 1]?.url || 
-                                  video.thumbnail?.thumbnails?.[0]?.url || "",
-                        views: extractText(video.viewCountText) || extractText(video.shortViewCountText),
-                        published_at: extractText(video.publishedTimeText),
-                        duration: extractText(video.lengthText),
-                        description: video.descriptionSnippet ? extractText(video.descriptionSnippet) : ""
-                    });
-                }
-                
-                // النمط الجديد: lockupViewModel مع contentId
-                if (obj.lockupViewModel && obj.lockupViewModel.contentId && obj.lockupViewModel.contentId.length === 11) {
-                    const lockup = obj.lockupViewModel;
-                    const videoId = lockup.contentId;
-                    
-                    // التحقق من وجود صورة مصغرة (للتأكد أنه فيديو)
-                    let hasThumbnail = false;
-                    let thumbnail = "";
-                    
-                    // البحث عن الصورة المصغرة
-                    if (lockup.contentImage?.thumbnailViewModel?.thumbnailViewModelImage?.ytThumbnailViewModelImage) {
-                        const thumbObj = lockup.contentImage.thumbnailViewModel.thumbnailViewModelImage.ytThumbnailViewModelImage;
-                        thumbnail = thumbObj.ytCoreImageHost?.src || thumbObj.img?.src || "";
-                        hasThumbnail = !!thumbnail;
-                    }
-                    
-                    if (hasThumbnail) {
-                        // استخراج العنوان
-                        let title = "";
-                        const metadataContainer = lockup.metadata?.lockupMetadataViewModel?.ytLockupMetadataViewModelHost?.ytLockupMetadataViewModelTextContainer;
-                        
-                        if (metadataContainer?.ytLockupMetadataViewModelHeadingReset) {
-                            const headingObj = metadataContainer.ytLockupMetadataViewModelHeadingReset;
-                            title = extractText(headingObj.ytLockupMetadataViewModelTitle || headingObj);
-                            
-                            // إذا لم يتم العثور على العنوان، حاول من الخصائص الأخرى
-                            if (!title) {
-                                title = headingObj.title || headingObj.ariaLabel?.split(" 1 hour")[0]?.split(" 1 minute")[0] || "";
+                            if (o.href && typeof o.href === 'string' && o.href.includes('http')) {
+                                links.push({
+                                    platform: "Link",
+                                    url: o.href
+                                });
                             }
-                        }
-                        
-                        // استخراج مدة الفيديو
-                        let duration = "";
-                        const badgeObj = lockup.contentImage?.thumbnailViewModel?.thumbnailViewModelImage?.ytThumbnailViewModelImage?.ytThumbnailBottomOverlayViewModel?.ytThumbnailBottomOverlayViewModelHost;
-                        
-                        if (badgeObj?.ytThumbnailBottomOverlayViewModelBadgeContainer?.ytThumbnailBadgeViewModel?.ytThumbnailBadgeViewModelHost?.badgeShape?.ytBadgeShapeHost?.ytBadgeShapeText) {
-                            duration = badgeObj.ytThumbnailBottomOverlayViewModelBadgeContainer.ytThumbnailBadgeViewModel.ytThumbnailBadgeViewModelHost.badgeShape.ytBadgeShapeHost.ytBadgeShapeText;
-                        }
-                        
-                        // استخراج المشاهدات وتاريخ النشر
-                        let views = "";
-                        let publishedAt = "";
-                        
-                        if (metadataContainer?.ytLockupMetadataViewModelMetadata?.ytContentMetadataViewModel?.ytContentMetadataViewModelHost) {
-                            const metadataHost = metadataContainer.ytLockupMetadataViewModelMetadata.ytContentMetadataViewModel.ytContentMetadataViewModelHost;
                             
-                            // النمط المسطح
-                            if (metadataHost.ytContentMetadataViewModelMetadataText) {
-                                const text = extractText(metadataHost.ytContentMetadataViewModelMetadataText);
-                                if (text.includes("views") || text.includes("watching")) {
-                                    views = text;
-                                } else {
-                                    publishedAt = text;
+                            for (let key in o) {
+                                if (typeof o[key] === 'object') {
+                                    findLinks(o[key], links, depth + 1);
                                 }
                             }
-                            
-                            // النمط مع الصفوف
-                            if (metadataHost.ytContentMetadataViewModelMetadataRow && Array.isArray(metadataHost.ytContentMetadataViewModelMetadataRow)) {
-                                const texts = metadataHost.ytContentMetadataViewModelMetadataRow
-                                    .map(row => extractText(row.ytAttributedStringHost || row))
-                                    .filter(text => text !== "");
-                                
-                                if (texts.length >= 1) views = texts[0];
-                                if (texts.length >= 2) publishedAt = texts[1];
-                            }
+                            return links;
                         }
                         
-                        // إضافة الفيديو إذا كان يحتوي على معرف وعنوان
-                        if (videoId && title && !videos.some(v => v.id === videoId)) {
-                            videos.push({
-                                id: videoId,
-                                title: title,
-                                video_url: `https://www.youtube.com/watch?v=${videoId}`,
-                                thumbnail: thumbnail,
-                                views: views,
-                                published_at: publishedAt,
-                                duration: duration
-                            });
+                        const links = findLinks(attrObj);
+                        if (links.length > 0) {
+                            channelInfo.social_links = links.slice(0, 5);
                         }
                     }
                 }
                 
-                // البحث في العناصر الفرعية
                 Object.entries(obj).forEach(([key, value]) => {
-                    searchDeep(value, `${path}.${key}`);
+                    searchChannelInfo(value, `${path}.${key}`);
                 });
             }
         }
 
-        // بدء البحث العميق
-        searchDeep(jsonData);
+        searchChannelInfo(jsonData);
         
-        // ========== طريقة بديلة لاستخراج الفيديوهات إذا لم تنجح الطريقة الأولى ==========
-        if (videos.length === 0) {
-            // البحث عن ytInitialPlayerResponse أو أي بيانات أخرى
-            const playerMatch = html.match(/var ytInitialPlayerResponse = (.*?);<\/script>/);
-            if (playerMatch && playerMatch[1]) {
-                const playerData = JSON.parse(playerMatch[1]);
-                // يمكن استخراج بعض المعلومات من هنا إذا لزم الأمر
-            }
-            
-            // البحث في html مباشرة عن روابط الفيديو
-            const videoMatches = html.match(/\/watch\?v=([a-zA-Z0-9_-]{11})/g);
-            if (videoMatches) {
-                const uniqueIds = [...new Set(videoMatches.map(match => match.split('v=')[1]))];
-                
-                // استخراج العناوين من html
-                uniqueIds.slice(0, 30).forEach(videoId => {
-                    const titleMatch = html.match(new RegExp(`"videoId":"${videoId}".*?"title":{"runs":\\[{"text":"([^"]+)"`, 's'));
-                    const title = titleMatch ? titleMatch[1] : "";
-                    
-                    videos.push({
-                        id: videoId,
-                        title: title || `Video ${videoId}`,
-                        video_url: `https://www.youtube.com/watch?v=${videoId}`,
-                        thumbnail: `https://i.ytimg.com/vi/${videoId}/hqdefault.jpg`,
-                        views: "",
-                        published_at: "",
-                        duration: ""
-                    });
-                });
-            }
+        // تنظيف البيانات
+        if (!channelInfo.name && channelInfo.handle) {
+            channelInfo.name = channelInfo.handle.replace("@", "");
         }
         
-        // إزالة الفيديوهات المكررة
-        const uniqueVideos = Array.from(new Map(videos.map(video => [video.id, video])).values());
-        
-        // أخذ آخر 30 فيديو
-        const recentVideos = uniqueVideos.slice(0, 30);
-        
-        // تنسيق النتيجة النهائية
-        const result = {
-            channel: {
-                ...channelInfo,
-                url: channelUrl,
-                total_videos_extracted: recentVideos.length
-            },
-            videos: recentVideos
-        };
-        
-        // إضافة معلومات إضافية إذا كانت القناة فارغة
-        if (!result.channel.name && !result.channel.handle) {
-            // استخراج اسم القناة من الرابط
-            const handleMatch = channelUrl.match(/@([^\/]+)/);
-            if (handleMatch) {
-                result.channel.handle = `@${handleMatch[1]}`;
-                result.channel.name = handleMatch[1];
-            }
+        // تنظيف الوصف من النص الزائد
+        if (channelInfo.description) {
+            channelInfo.description = channelInfo.description.replace("...more", "").trim();
         }
         
-        res.json(result);
+        res.json(channelInfo);
 
     } catch (error) {
-        console.error("Channel Extraction Error:", error);
+        console.error("Channel Info Error:", error);
         res.status(500).json({ 
             error: "حدث خطأ أثناء استخراج بيانات القناة",
             details: error.message 
         });
     }
 });
+
+// ============ مسار استخراج فيديوهات القناة فقط ============
+app.get('/api/channel/videos', async (req, res) => {
+    const channelUrl = req.query.url;
+    
+    if (!channelUrl) {
+        return res.json({ 
+            error: "الرجاء إدخال رابط القناة",
+            example: "/api/channel/videos?url=https://www.youtube.com/@IShowSpeed/videos"
+        });
+    }
+
+    try {
+        const response = await fetch(channelUrl, {
+            headers: {
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+                'Accept-Language': 'en-US,en;q=0.9',
+                'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8'
+            }
+        });
+        
+        const html = await response.text();
+        
+        // استخراج ytInitialData
+        const match = html.match(/var ytInitialData = (.*?);<\/script>/);
+        if (!match || !match[1]) {
+            return res.json({ error: "لم يتم العثور على بيانات الفيديوهات" });
+        }
+
+        const jsonData = JSON.parse(match[1]);
+        let videos = [];
+        let videoDetails = {};
+
+        // أولاً: جمع كل التفاصيل من العناصر
+        function collectVideoDetails(obj) {
+            if (Array.isArray(obj)) {
+                obj.forEach(collectVideoDetails);
+            } else if (obj !== null && typeof obj === 'object') {
+                
+                // جمع تفاصيل الفيديو من lockupViewModel
+                if (obj.lockupViewModel && obj.lockupViewModel.contentId) {
+                    const lockup = obj.lockupViewModel;
+                    const videoId = lockup.contentId;
+                    
+                    // التحقق من أن هذا فيديو (وليس قناة أو قائمة تشغيل)
+                    const isVideo = lockup.contentImage?.thumbnailViewModel?.thumbnailViewModelImage?.ytThumbnailViewModelImage?.ytThumbnailBottomOverlayViewModel !== undefined;
+                    
+                    if (isVideo && videoId.length === 11) {
+                        if (!videoDetails[videoId]) {
+                            videoDetails[videoId] = {
+                                id: videoId,
+                                title: "",
+                                thumbnail: "",
+                                views: "",
+                                published_at: "",
+                                duration: ""
+                            };
+                        }
+                        
+                        // استخراج العنوان
+                        const titleObj = lockup.metadata?.lockupMetadataViewModel?.ytLockupMetadataViewModelHost?.ytLockupMetadataViewModelTextContainer?.ytLockupMetadataViewModelHeadingReset;
+                        if (titleObj) {
+                            // البحث عن العنوان في كائنات مختلفة
+                            if (titleObj.ytLockupMetadataViewModelTitle) {
+                                const titleData = titleObj.ytLockupMetadataViewModelTitle;
+                                if (titleData.content) {
+                                    videoDetails[videoId].title = titleData.content;
+                                } else if (titleData.runs && Array.isArray(titleData.runs)) {
+                                    videoDetails[videoId].title = titleData.runs.map(r => r.text || "").join("");
+                                }
+                            } else if (titleObj.title) {
+                                videoDetails[videoId].title = titleObj.title;
+                            } else if (titleObj.ariaLabel) {
+                                // إزالة المدة من نهاية العنوان
+                                videoDetails[videoId].title = titleObj.ariaLabel.replace(/\s+\d+\s+(hour|minute|second)s?.*$/i, "");
+                            }
+                        }
+                        
+                        // استخراج الصورة المصغرة
+                        const thumbObj = lockup.contentImage?.thumbnailViewModel?.thumbnailViewModelImage?.ytThumbnailViewModelImage;
+                        if (thumbObj?.ytCoreImageHost?.src) {
+                            videoDetails[videoId].thumbnail = thumbObj.ytCoreImageHost.src;
+                        }
+                        
+                        // استخراج المدة
+                        const durationObj = thumbObj?.ytThumbnailBottomOverlayViewModel?.ytThumbnailBottomOverlayViewModelHost?.ytThumbnailBottomOverlayViewModelBadgeContainer?.ytThumbnailBadgeViewModel?.ytThumbnailBadgeViewModelHost?.badgeShape?.ytBadgeShapeHost?.ytBadgeShapeText;
+                        if (durationObj) {
+                            videoDetails[videoId].duration = durationObj;
+                        }
+                        
+                        // استخراج المشاهدات وتاريخ النشر
+                        const metadataContainer = lockup.metadata?.lockupMetadataViewModel?.ytLockupMetadataViewModelHost?.ytLockupMetadataViewModelTextContainer?.ytLockupMetadataViewModelMetadata;
+                        
+                        if (metadataContainer?.ytContentMetadataViewModel?.ytContentMetadataViewModelHost) {
+                            const metadataHost = metadataContainer.ytContentMetadataViewModel.ytContentMetadataViewModelHost;
+                            
+                            // جمع كل النصوص
+                            const texts = [];
+                            if (metadataHost.ytContentMetadataViewModelMetadataRow) {
+                                metadataHost.ytContentMetadataViewModelMetadataRow.forEach(row => {
+                                    const textObj = row.ytAttributedStringHost;
+                                    if (textObj?.content) {
+                                        texts.push(textObj.content);
+                                    } else if (textObj?.runs) {
+                                        texts.push(textObj.runs.map(r => r.text || "").join(""));
+                                    }
+                                });
+                            }
+                            
+                            // أيضًا النص المسطح
+                            if (metadataHost.ytContentMetadataViewModelMetadataText) {
+                                const textObj = metadataHost.ytContentMetadataViewModelMetadataText;
+                                if (textObj.content) {
+                                    texts.push(textObj.content);
+                                } else if (textObj.runs) {
+                                    texts.push(textObj.runs.map(r => r.text || "").join(""));
+                                }
+                            }
+                            
+                            if (texts.length >= 1) videoDetails[videoId].views = texts[0];
+                            if (texts.length >= 2) videoDetails[videoId].published_at = texts[1];
+                        }
+                    }
+                }
+                
+                Object.values(obj).forEach(collectVideoDetails);
+            }
+        }
+        
+        collectVideoDetails(jsonData);
+        
+        // تحويل الكائن إلى مصفوفة
+        videos = Object.values(videoDetails);
+        
+        // ترتيب الفيديوهات حسب الترتيب الذي ظهرت به
+        videos.sort((a, b) => {
+            const orderA = Object.keys(videoDetails).indexOf(a.id);
+            const orderB = Object.keys(videoDetails).indexOf(b.id);
+            return orderA - orderB;
+        });
+        
+        // إزالة الفيديوهات المكررة
+        const uniqueVideos = Array.from(new Map(videos.map(video => [video.id, video])).values());
+        
+        // أخذ أول 30 فيديو
+        const recentVideos = uniqueVideos.slice(0, 30);
+        
+        // تنسيق الروابط
+        const finalVideos = recentVideos.map(video => ({
+            ...video,
+            video_url: `https://www.youtube.com/watch?v=${video.id}`,
+            thumbnail: video.thumbnail || `https://i.ytimg.com/vi/${video.id}/hqdefault.jpg`
+        }));
+        
+        res.json({
+            total_videos: finalVideos.length,
+            videos: finalVideos
+        });
+
+    } catch (error) {
+        console.error("Channel Videos Error:", error);
+        res.status(500).json({ 
+            error: "حدث خطأ أثناء استخراج فيديوهات القناة",
+            details: error.message 
+        });
+    }
+});
+
+
 
 
 
