@@ -109,78 +109,162 @@ function parseAndFormatData(data) {
 
 
 
-// مسار البحث في يوتيوب
 app.get('/api/search', async (req, res) => {
-    const query = req.query.q; // الكلمة المراد البحث عنها
+    const query = req.query.q;
     
     if (!query) {
-        return res.json({ error: "الرجاء إدخال كلمة البحث، مثال: /api/search?q=قرآن" });
+        return res.json({ error: "الرجاء إدخال كلمة البحث" });
     }
 
     try {
         const searchUrl = `https://www.youtube.com/results?search_query=${encodeURIComponent(query)}`;
-        
-        // جلب صفحة البحث
         const response = await fetch(searchUrl, {
             headers: {
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-                'Accept-Language': 'ar,en-US;q=0.9,en;q=0.8' // للحصول على البيانات باللغة العربية إن أمكن
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)',
+                'Accept-Language': 'ar,en-US;q=0.9,en;q=0.8'
             }
         });
         
         const html = await response.text();
-
-        // استخراج كائن البيانات الأساسي الخاص بيوتيوب
-        // يوتيوب يخزن كل البيانات كـ JSON داخل متغير ytInitialData
         const match = html.match(/var ytInitialData = (.*?);<\/script>/);
         
-        if (!match || !match[1]) {
-            return res.json([]); // إذا لم يتم العثور على بيانات نرجع مصفوفة فارغة
-        }
+        if (!match || !match[1]) return res.json([]);
 
         const jsonData = JSON.parse(match[1]);
         let results = [];
 
-        // تتبع مسار البيانات داخل ملف يوتيوب المعقد للوصول إلى قسم الفيديوهات
-        const contents = jsonData.contents?.twoColumnSearchResultsRenderer?.primaryContents?.sectionListRenderer?.contents;
-        
-        if (contents) {
-            // البحث عن القسم الذي يحتوي على قائمة الفيديوهات
-            const videoItems = contents.find(section => section.itemSectionRenderer)?.itemSectionRenderer?.contents || [];
-            
-            // استخراج وتنسيق البيانات
-            videoItems.forEach(item => {
-                if (item.videoRenderer) {
-                    const video = item.videoRenderer;
-                    
+        // دالة تكرارية للبحث في كل أعماق البيانات لجلب كل الفيديوهات
+        function extractVideos(obj) {
+            if (Array.isArray(obj)) {
+                obj.forEach(extractVideos);
+            } else if (obj !== null && typeof obj === 'object') {
+                if (obj.videoRenderer && obj.videoRenderer.videoId) {
+                    const video = obj.videoRenderer;
                     results.push({
                         id: video.videoId || "",
                         title: video.title?.runs?.[0]?.text || "",
                         video_url: `https://www.youtube.com/watch?v=${video.videoId}`,
                         thumbnail: video.thumbnail?.thumbnails?.[0]?.url || "",
-                        views: video.viewCountText?.simpleText || "غير معروف",
-                        published_at: video.publishedTimeText?.simpleText || "غير معروف",
-                        channel: {
-                            name: video.ownerText?.runs?.[0]?.text || "",
-                            url: video.ownerText?.runs?.[0]?.navigationEndpoint?.commandMetadata?.webCommandMetadata?.url 
-                                 ? `https://www.youtube.com${video.ownerText.runs[0].navigationEndpoint.commandMetadata.webCommandMetadata.url}` 
-                                 : "",
-                            avatar: video.channelThumbnailSupportedRenderers?.channelThumbnailWithLinkRenderer?.thumbnail?.thumbnails?.[0]?.url || ""
-                        }
+                        views: video.viewCountText?.simpleText || video.shortViewCountText?.simpleText || "",
+                        published_at: video.publishedTimeText?.simpleText || "",
+                        // الهيكل المسطح الجديد
+                        channel_name: video.ownerText?.runs?.[0]?.text || "",
+                        channel_url: video.ownerText?.runs?.[0]?.navigationEndpoint?.commandMetadata?.webCommandMetadata?.url 
+                                     ? `https://www.youtube.com${video.ownerText.runs[0].navigationEndpoint.commandMetadata.webCommandMetadata.url}` 
+                                     : "",
+                        channel_avatar: video.channelThumbnailSupportedRenderers?.channelThumbnailWithLinkRenderer?.thumbnail?.thumbnails?.[0]?.url || ""
                     });
                 }
-            });
+                Object.values(obj).forEach(extractVideos);
+            }
         }
 
-        // إرجاع النتيجة بشكل ثابت ومنسق
-        res.json(results);
+        extractVideos(jsonData.contents || {});
+
+        // تنظيف الفيديوهات المكررة (لأن يوتيوب أحياناً يكرر الفيديو في المقترحات)
+        const uniqueResults = Array.from(new Map(results.map(item => [item.id, item])).values());
+
+        res.json(uniqueResults);
 
     } catch (error) {
         console.error("Search Error:", error);
-        res.json([]); // في حال حدوث خطأ نرجع مصفوفة فارغة
+        res.json([]);
     }
 });
 
+
+
+
+app.get('/api/video_info', async (req, res) => {
+    let videoUrl = req.query.url;
+    
+    if (!videoUrl) {
+        return res.json({ error: "الرجاء إدخال رابط الفيديو، مثال: /api/video_info?url=..." });
+    }
+
+    // التأكد من أن الرابط كامل للبحث
+    if (!videoUrl.includes('youtube.com') && !videoUrl.includes('youtu.be')) {
+        videoUrl = `https://www.youtube.com/watch?v=${videoUrl}`;
+    }
+
+    const DEFAULT_INFO = {
+        title: "",
+        description: "",
+        likes: "",
+        channel_name: "",
+        channel_subscribers: "",
+        channel_avatar: ""
+    };
+
+    try {
+        const response = await fetch(videoUrl, {
+            headers: {
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)',
+                'Accept-Language': 'ar,en-US;q=0.9,en;q=0.8'
+            }
+        });
+        
+        const html = await response.text();
+
+        // استخراج كائنات البيانات من الصفحة
+        const initialDataMatch = html.match(/var ytInitialData = (.*?);<\/script>/);
+        const playerResponseMatch = html.match(/var ytInitialPlayerResponse = (.*?);<\/script>/);
+        
+        if (!initialDataMatch || !playerResponseMatch) {
+            return res.json(DEFAULT_INFO);
+        }
+
+        const initialData = JSON.parse(initialDataMatch[1]);
+        const playerResponse = JSON.parse(playerResponseMatch[1]);
+
+        let result = { ...DEFAULT_INFO };
+
+        // 1. جلب العنوان والوصف من PlayerResponse (لأنه أسهل وأكثر دقة)
+        if (playerResponse.videoDetails) {
+            result.title = playerResponse.videoDetails.title || "";
+            result.description = playerResponse.videoDetails.shortDescription || "";
+            result.channel_name = playerResponse.videoDetails.author || "";
+        }
+
+        // 2. دالة تكرارية للبحث عن (اللايكات، المشتركين، صورة القناة) في InitialData
+        function findVideoStats(obj) {
+            if (Array.isArray(obj)) {
+                obj.forEach(findVideoStats);
+            } else if (obj !== null && typeof obj === 'object') {
+                
+                // جلب عدد اللايكات
+                if (obj.factoredLikeButtonRenderer) {
+                    const likeData = obj.factoredLikeButtonRenderer.likeButton?.toggleButtonRenderer;
+                    if (likeData && likeData.defaultText?.accessibility) {
+                        result.likes = likeData.defaultText.accessibility.accessibilityData?.label || result.likes;
+                        // استخراج الرقم فقط من الجملة (مثل: "15,000 إعجاب")
+                        result.likes = result.likes.replace(/[^0-9,]/g, '').trim(); 
+                    }
+                }
+
+                // جلب معلومات القناة (صورة، مشتركين)
+                if (obj.videoOwnerRenderer) {
+                    if (!result.channel_subscribers) {
+                        result.channel_subscribers = obj.videoOwnerRenderer.subscriberCountText?.simpleText || "";
+                    }
+                    if (!result.channel_avatar) {
+                        result.channel_avatar = obj.videoOwnerRenderer.thumbnail?.thumbnails?.[0]?.url || "";
+                    }
+                }
+
+                Object.values(obj).forEach(findVideoStats);
+            }
+        }
+
+        findVideoStats(initialData);
+
+        res.json(result);
+
+    } catch (error) {
+        console.error("Video Info Error:", error);
+        res.json(DEFAULT_INFO);
+    }
+});
 
 
 
