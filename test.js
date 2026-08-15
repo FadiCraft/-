@@ -178,9 +178,6 @@ app.get('/api/search', async (req, res) => {
 
 
 
-
-
-
 // ============ مسار استخراج بيانات القناة فقط ============
 app.get('/api/channel/info', async (req, res) => {
     const channelUrl = req.query.url;
@@ -211,8 +208,7 @@ app.get('/api/channel/info', async (req, res) => {
             subscribers: "",
             videos_count: "",
             description: "",
-            verified: false,
-            social_links: []
+            verified: false
         };
 
         // استخراج اسم القناة والمقبض من الرابط
@@ -251,58 +247,22 @@ app.get('/api/channel/info', async (req, res) => {
             }
         }
 
-        // استخراج المشتركين وعدد الفيديوهات
-        const subscriberMatch = html.match(/([\d.,]+[KM]?)\s*subscribers/);
-        if (subscriberMatch) {
-            channelInfo.subscribers = `${subscriberMatch[1]} subscribers`;
-        }
-
-        const videosCountMatch = html.match(/([\d.,]+[KM]?)\s*videos/);
-        if (videosCountMatch) {
-            channelInfo.videos_count = `${videosCountMatch[1]} videos`;
-        }
-
-        // التحقق من التوثيق
-        if (html.includes('"verified":true') || html.includes('badge-style-type-verified')) {
-            channelInfo.verified = true;
-        }
-
-        // استخراج الروابط الاجتماعية
-        const socialLinks = [];
-        const socialMatches = html.match(/https?:\/\/(twitter\.com|x\.com|instagram\.com|facebook\.com|tiktok\.com|twitch\.tv|discord\.gg)[^"'\s\\]+/g);
-        if (socialMatches) {
-            const uniqueLinks = [...new Set(socialMatches)];
-            uniqueLinks.slice(0, 10).forEach(link => {
-                const platform = link.includes('twitter') || link.includes('x.com') ? 'Twitter/X' :
-                                link.includes('instagram') ? 'Instagram' :
-                                link.includes('facebook') ? 'Facebook' :
-                                link.includes('tiktok') ? 'TikTok' :
-                                link.includes('twitch') ? 'Twitch' :
-                                link.includes('discord') ? 'Discord' : 'Social';
-                socialLinks.push({
-                    platform: platform,
-                    url: link
-                });
-            });
-        }
-        channelInfo.social_links = socialLinks;
-
-        // البحث في ytInitialData للحصول على معلومات إضافية
+        // استخراج المشتركين وعدد الفيديوهات من ytInitialData
         const match = html.match(/var ytInitialData = (.*?);<\/script>/);
         if (match && match[1]) {
             try {
                 const jsonData = JSON.parse(match[1]);
                 const jsonStr = JSON.stringify(jsonData);
                 
-                // استخراج المشتركين من البيانات المنظمة
+                // استخراج المشتركين
                 const subMatch = jsonStr.match(/"content":"([\d.,]+[KM]? subscribers)"/);
-                if (subMatch && !channelInfo.subscribers) {
+                if (subMatch) {
                     channelInfo.subscribers = subMatch[1];
                 }
                 
-                // استخراج عدد الفيديوهات من البيانات المنظمة
+                // استخراج عدد الفيديوهات
                 const vidCountMatch = jsonStr.match(/"content":"([\d.,]+[KM]? videos)"/);
-                if (vidCountMatch && !channelInfo.videos_count) {
+                if (vidCountMatch) {
                     channelInfo.videos_count = vidCountMatch[1];
                 }
                 
@@ -312,6 +272,11 @@ app.get('/api/channel/info', async (req, res) => {
                     if (avatarFromJson) {
                         channelInfo.avatar = avatarFromJson[1];
                     }
+                }
+                
+                // التحقق من التوثيق
+                if (jsonStr.includes('"verified":true') || jsonStr.includes('VERIFIED')) {
+                    channelInfo.verified = true;
                 }
                 
             } catch (error) {
@@ -362,7 +327,7 @@ app.get('/api/channel/videos', async (req, res) => {
         const html = await response.text();
         let videos = [];
 
-        // الطريقة 1: استخراج من ytInitialData
+        // استخراج من ytInitialData
         const match = html.match(/var ytInitialData = (.*?);<\/script>/);
         if (match && match[1]) {
             try {
@@ -370,7 +335,7 @@ app.get('/api/channel/videos', async (req, res) => {
                 
                 // البحث العميق عن الفيديوهات
                 function findVideos(obj, depth = 0) {
-                    if (depth > 20) return; // منع التكرار اللانهائي
+                    if (depth > 20) return;
                     
                     if (Array.isArray(obj)) {
                         obj.forEach(item => findVideos(item, depth + 1));
@@ -380,7 +345,7 @@ app.get('/api/channel/videos', async (req, res) => {
                         if (obj.videoId && typeof obj.videoId === 'string' && obj.videoId.length === 11) {
                             const videoId = obj.videoId;
                             
-                            // البحث عن العنوان في نفس الكائن أو الكائنات المجاورة
+                            // البحث عن العنوان
                             let title = "";
                             if (obj.title) {
                                 if (typeof obj.title === 'string') {
@@ -422,11 +387,11 @@ app.get('/api/channel/videos', async (req, res) => {
                                 duration = obj.lengthText.simpleText;
                             }
                             
-                            // إضافة الفيديو إذا لم يكن موجودًا
-                            if (!videos.some(v => v.id === videoId)) {
+                            // إضافة الفيديو فقط إذا كان له عنوان صحيح
+                            if (title && !videos.some(v => v.id === videoId)) {
                                 videos.push({
                                     id: videoId,
-                                    title: title || "",
+                                    title: title,
                                     video_url: `https://www.youtube.com/watch?v=${videoId}`,
                                     thumbnail: thumbnail || `https://i.ytimg.com/vi/${videoId}/hqdefault.jpg`,
                                     views: views,
@@ -443,33 +408,46 @@ app.get('/api/channel/videos', async (req, res) => {
                 
                 findVideos(jsonData);
                 
+                // إذا لم نجد فيديوهات بالعناوين، نبحث بطريقة أخرى
+                if (videos.length === 0) {
+                    // البحث عن richItemRenderer
+                    const jsonStr = JSON.stringify(jsonData);
+                    const richItems = jsonStr.match(/"richItemRenderer":\{"content":\{"videoRenderer":\{.*?\}\}\}/g);
+                    
+                    if (richItems) {
+                        richItems.forEach(item => {
+                            try {
+                                const videoData = JSON.parse(item);
+                                const videoRenderer = videoData.richItemRenderer.content.videoRenderer;
+                                
+                                if (videoRenderer.videoId) {
+                                    const title = videoRenderer.title?.runs?.[0]?.text || "";
+                                    const thumbnail = videoRenderer.thumbnail?.thumbnails?.[0]?.url || "";
+                                    const views = videoRenderer.viewCountText?.simpleText || "";
+                                    const publishedAt = videoRenderer.publishedTimeText?.simpleText || "";
+                                    const duration = videoRenderer.lengthText?.simpleText || "";
+                                    
+                                    if (title && !videos.some(v => v.id === videoRenderer.videoId)) {
+                                        videos.push({
+                                            id: videoRenderer.videoId,
+                                            title: title,
+                                            video_url: `https://www.youtube.com/watch?v=${videoRenderer.videoId}`,
+                                            thumbnail: thumbnail || `https://i.ytimg.com/vi/${videoRenderer.videoId}/hqdefault.jpg`,
+                                            views: views,
+                                            published_at: publishedAt,
+                                            duration: duration
+                                        });
+                                    }
+                                }
+                            } catch (e) {
+                                // تجاهل الأخطاء في parsing
+                            }
+                        });
+                    }
+                }
+                
             } catch (error) {
                 console.error("Error parsing ytInitialData for videos:", error);
-            }
-        }
-
-        // الطريقة 2: إذا لم يتم العثور على فيديوهات، استخرج من HTML مباشرة
-        if (videos.length === 0) {
-            // استخراج معرفات الفيديو من HTML
-            const videoIdMatches = html.match(/\/watch\?v=([a-zA-Z0-9_-]{11})/g);
-            if (videoIdMatches) {
-                const uniqueIds = [...new Set(videoIdMatches.map(match => {
-                    const id = match.match(/v=([a-zA-Z0-9_-]{11})/);
-                    return id ? id[1] : null;
-                }).filter(Boolean))];
-                
-                // استخراج العناوين من ytInitialPlayerResponse أو من HTML
-                uniqueIds.slice(0, 30).forEach(videoId => {
-                    videos.push({
-                        id: videoId,
-                        title: "",
-                        video_url: `https://www.youtube.com/watch?v=${videoId}`,
-                        thumbnail: `https://i.ytimg.com/vi/${videoId}/hqdefault.jpg`,
-                        views: "",
-                        published_at: "",
-                        duration: ""
-                    });
-                });
             }
         }
 
@@ -477,17 +455,8 @@ app.get('/api/channel/videos', async (req, res) => {
         const uniqueVideos = Array.from(new Map(videos.map(video => [video.id, video])).values());
         const recentVideos = uniqueVideos.slice(0, 30);
         
-        // تنظيف العناوين الفارغة
-        const finalVideos = recentVideos.filter(video => {
-            // إزالة الفيديوهات التي تحتوي على عنوان "الانضمام إلى عضوية"
-            return !video.title.includes("الانضمام إلى عضوية") && 
-                   !video.title.includes("Join this channel");
-        });
-
-        res.json({
-            total_videos: finalVideos.length,
-            videos: finalVideos
-        });
+        // إرجاع المصفوفة مباشرة بدون غلاف
+        res.json(recentVideos);
 
     } catch (error) {
         console.error("Channel Videos Error:", error);
@@ -497,6 +466,9 @@ app.get('/api/channel/videos', async (req, res) => {
         });
     }
 });
+
+
+
 
 
 
