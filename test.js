@@ -175,94 +175,40 @@ app.get('/api/search', async (req, res) => {
 
 
 
+
+
+
+
 app.get('/api/video_info', async (req, res) => {
-    let videoUrl = req.query.url;
+    const videoUrl = req.query.url;
     
-    if (!videoUrl) {
-        return res.json({ error: "الرجاء إدخال رابط الفيديو، مثال: /api/video_info?url=..." });
-    }
-
-    // التأكد من أن الرابط كامل للبحث
-    if (!videoUrl.includes('youtube.com') && !videoUrl.includes('youtu.be')) {
-        videoUrl = `https://www.youtube.com/watch?v=${videoUrl}`;
-    }
-
-    const DEFAULT_INFO = {
-        title: "",
-        description: "",
-        likes: "",
-        channel_name: "",
-        channel_subscribers: "",
-        channel_avatar: ""
-    };
+    if (!videoUrl) return res.status(400).json({ error: "Missing URL" });
 
     try {
-        const response = await fetch(videoUrl, {
-            headers: {
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)',
-                'Accept-Language': 'ar,en-US;q=0.9,en;q=0.8'
-            }
-        });
+        const response = await axios.get(videoUrl);
+        const html = response.data;
+
+        // استخراج متغير ytInitialData من كود الصفحة
+        const ytInitialDataMatch = html.match(/var ytInitialData = (.*?);<\/script>/);
         
-        const html = await response.text();
+        if (ytInitialDataMatch && ytInitialDataMatch[1]) {
+            const data = JSON.parse(ytInitialDataMatch[1]);
+            
+            // التنقل داخل الكائن المعقد للوصول للوصف (قد يتغير المسار قليلاً من يوتيوب)
+            const videoDetails = data.contents?.twoColumnWatchNextResults?.results?.results?.contents?.[1]?.videoSecondaryInfoRenderer;
+            const description = videoDetails?.description?.runs?.map(run => run.text).join('') || "لا يوجد وصف";
 
-        // استخراج كائنات البيانات من الصفحة
-        const initialDataMatch = html.match(/var ytInitialData = (.*?);<\/script>/);
-        const playerResponseMatch = html.match(/var ytInitialPlayerResponse = (.*?);<\/script>/);
-        
-        if (!initialDataMatch || !playerResponseMatch) {
-            return res.json(DEFAULT_INFO);
+            // يمكنك هنا استخراج باقي التفاصيل (اللايكات، العنوان، إلخ)
+            
+            res.json({
+                success: true,
+                description: description
+            });
+        } else {
+            res.status(500).json({ error: "Could not find video data" });
         }
-
-        const initialData = JSON.parse(initialDataMatch[1]);
-        const playerResponse = JSON.parse(playerResponseMatch[1]);
-
-        let result = { ...DEFAULT_INFO };
-
-        // 1. جلب العنوان والوصف من PlayerResponse (لأنه أسهل وأكثر دقة)
-        if (playerResponse.videoDetails) {
-            result.title = playerResponse.videoDetails.title || "";
-            result.description = playerResponse.videoDetails.shortDescription || "";
-            result.channel_name = playerResponse.videoDetails.author || "";
-        }
-
-        // 2. دالة تكرارية للبحث عن (اللايكات، المشتركين، صورة القناة) في InitialData
-        function findVideoStats(obj) {
-            if (Array.isArray(obj)) {
-                obj.forEach(findVideoStats);
-            } else if (obj !== null && typeof obj === 'object') {
-                
-                // جلب عدد اللايكات
-                if (obj.factoredLikeButtonRenderer) {
-                    const likeData = obj.factoredLikeButtonRenderer.likeButton?.toggleButtonRenderer;
-                    if (likeData && likeData.defaultText?.accessibility) {
-                        result.likes = likeData.defaultText.accessibility.accessibilityData?.label || result.likes;
-                        // استخراج الرقم فقط من الجملة (مثل: "15,000 إعجاب")
-                        result.likes = result.likes.replace(/[^0-9,]/g, '').trim(); 
-                    }
-                }
-
-                // جلب معلومات القناة (صورة، مشتركين)
-                if (obj.videoOwnerRenderer) {
-                    if (!result.channel_subscribers) {
-                        result.channel_subscribers = obj.videoOwnerRenderer.subscriberCountText?.simpleText || "";
-                    }
-                    if (!result.channel_avatar) {
-                        result.channel_avatar = obj.videoOwnerRenderer.thumbnail?.thumbnails?.[0]?.url || "";
-                    }
-                }
-
-                Object.values(obj).forEach(findVideoStats);
-            }
-        }
-
-        findVideoStats(initialData);
-
-        res.json(result);
-
     } catch (error) {
-        console.error("Video Info Error:", error);
-        res.json(DEFAULT_INFO);
+        res.status(500).json({ error: error.message });
     }
 });
 
