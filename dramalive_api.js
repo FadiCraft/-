@@ -874,4 +874,4 @@ const allTopics = [
 
 app.get("/get-all-topics", (req, res) => { res.json(allTopics); });
 
-app.listen(PORT, () => { console.log("🚀 Server running on port " + PORT); });
+module.exports = app;
