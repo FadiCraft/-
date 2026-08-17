@@ -3,8 +3,8 @@ const app = express();
 
 // استدعاء تطبيقاتك الثلاثة
 const topcinmaApp = require('./topcinma');
-const yacintvApp = require('./dramalive');
-const floratvApp = require('./laroza');
+const yacintvApp = require('./dramalive_api');
+const floratvApp = require('./laroza_api');
 
 // دمجها في سيرفر واحد مع تحديد المسار لكل تطبيق
 app.use('/topcinma', topcinmaApp);
