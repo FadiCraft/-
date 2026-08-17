@@ -92,7 +92,7 @@ app.get('/api/page', async (req, res) => {
                 title, 
                 url: movieUrl,
                 // مسار الصور الديناميكي
-                image: `${host}/api/image?url=${encodeURIComponent(fetchUrl)}&baseUrl=${encodeURIComponent(baseUrl)}`,
+                image: `${host}/floratv/api/image?url=${encodeURIComponent(fetchUrl)}&baseUrl=${encodeURIComponent(baseUrl)}`,
                 quality, 
                 eclip_Num,
                 genres: "",
