@@ -646,7 +646,7 @@ app.get("/live_id/:id", async (req, res) => {
         const cacheKey = `smart_live_${id_live}`;
         
         const data = await fetchWithCache(cacheKey, async () => {
-            const localBaseUrl = `http://localhost:${PORT}`;
+const localBaseUrl = `http://localhost:${PORT}/yacintv`;
             try {
                 const redirectResponse = await axios.get(`${localBaseUrl}/get-redirect-data?id_live=${id_live}`);
                 const redirectData = redirectResponse.data;
