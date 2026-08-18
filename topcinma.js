@@ -189,15 +189,28 @@ app.get('/api/episodes', async (req, res) => {
 });
 
 // ---------------------------------------------------------
-// المسار السريع لاستخراج السيرفرات (تم التحسين لتقليل الطلبات)
+// المسار السريع لاستخراج السيرفرات (مُصحح لدعم إعادة التوجيه)
 // ---------------------------------------------------------
 app.get('/api/watch', async (req, res) => {
     let targetUrl = req.query.url;
+    
     if (!targetUrl) return res.json([]);
-    if (!targetUrl.endsWith('/watch/')) targetUrl = targetUrl.replace(/\/$/, '') + '/watch/';
+    if (!targetUrl.endsWith('/watch/')) {
+        targetUrl = targetUrl.replace(/\/$/, '') + '/watch/';
+    }
 
     try {
-        const pageHtml = await fetchWithCache(encodeURI(targetUrl));
+        // 1. استخدام fetch المباشر لضمان التقاط الرابط النهائي (finalUrl) في حال وجود Redirect
+        const pageResponse = await fetch(encodeURI(targetUrl), {
+            headers: { 
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)",
+                "Accept-Encoding": "gzip, deflate, br" // ضغط البيانات لتقليل الباندويث
+            }
+        });
+
+        if (!pageResponse.ok) return res.json([]);
+
+        const pageHtml = await pageResponse.text();
         const $ = cheerio.load(pageHtml);
 
         const firstServerBtn = $('.server--item').first();
@@ -207,31 +220,33 @@ app.get('/api/watch', async (req, res) => {
         const serverIndexes = [];
         $('.server--item').each((i, el) => {
             const serverNum = $(el).attr('data-server');
-            if (i > 0 && serverNum !== "0") serverIndexes.push(serverNum);
+            if (i > 0 && serverNum !== "0") { 
+                serverIndexes.push(serverNum);
+            }
         });
 
-        // استخراج الدومين من الرابط المطلوب (لأنه قد لا نملك finalUrl في حالة الكاش)
-        const urlObj = new URL(encodeURI(targetUrl));
-        const currentDomain = urlObj.origin;
+        // 2. استخراج الدومين الفعّال والرابط النهائي بشكل صحيح لتجنب الحظر
+        const finalUrlObj = new URL(pageResponse.url);
+        const currentDomain = finalUrlObj.origin; 
         const serverUrl = `${currentDomain}/wp-content/themes/movies2023/Ajaxat/Single/Server.php`;
 
         const validServers = []; 
-        const maxServersNeeded = 4; // 💡 التعديل: نتوقف بعد إيجاد سيرفرين لتقليل استهلاك الباندويث
+        const maxServersNeeded = 2; // يمكنك زيادته إذا أردت استخراج سيرفرات أكثر
 
         for (let i of serverIndexes) {
             if (validServers.length >= maxServersNeeded) break; // توفير موارد السيرفر
 
             try {
-                // الكاش هنا مدته قصيرة جداً (دقيقة واحدة) لأن الروابط قد تتغير
+                // 3. استخدام الكاش لطلبات السيرفرات فقط لمدة دقيقة واحدة لتفادي تكرار طلبات Ajax
                 const serverHtml = await fetchWithCache(serverUrl, {
                     method: 'POST',
                     body: `id=${postId}&i=${i}`,
                     headers: {
                         "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8",
                         "X-Requested-With": "XMLHttpRequest",
-                        "Referer": targetUrl 
+                        "Referer": pageResponse.url // الرابط النهائي كـ Referer إلزامي هنا
                     }
-                }, 60000);
+                }, 60000); 
 
                 const $$ = cheerio.load(serverHtml);
                 const iframeSrc = $$('iframe').attr('src') || "";
@@ -251,14 +266,10 @@ app.get('/api/watch', async (req, res) => {
         return res.json(validServers);
 
     } catch (error) {
+        console.error("خطأ عام في مسار Watch:", error.message);
         return res.json([]);
     }
 });
-
-app.get('/', (req, res) => {
-  res.json([]);
-});
-
 // ---------------------------------------------------------
 // المسار الرابع: استخراج الحلقة التالية
 // ---------------------------------------------------------
