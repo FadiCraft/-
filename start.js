@@ -11,6 +11,11 @@ app.use('/topcinma', topcinmaApp);
 app.use('/yacintv', yacintvApp);
 app.use('/floratv', floratvApp);
 
+// إضافة مسار الدومين الأساسي ليعرض مصفوفة فارغة
+app.get('/', (req, res) => {
+  res.json([]);
+});
+
 // تشغيل السيرفر الموحد
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
