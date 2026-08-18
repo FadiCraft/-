@@ -875,9 +875,5 @@ const allTopics = [
 app.get("/get-all-topics", (req, res) => { res.json(allTopics); });
 
 
-// إضافة مسار الدومين الأساسي ليعرض مصفوفة فارغة
-app.get('/', (req, res) => {
-  res.json([]);
-});
 
 module.exports = app;
