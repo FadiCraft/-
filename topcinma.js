@@ -231,7 +231,7 @@ app.get('/api/watch', async (req, res) => {
         const serverUrl = `${currentDomain}/wp-content/themes/movies2023/Ajaxat/Single/Server.php`;
 
         const validServers = []; 
-        const maxServersNeeded = 2; // يمكنك زيادته إذا أردت استخراج سيرفرات أكثر
+        const maxServersNeeded = 4; // يمكنك زيادته إذا أردت استخراج سيرفرات أكثر
 
         for (let i of serverIndexes) {
             if (validServers.length >= maxServersNeeded) break; // توفير موارد السيرفر
