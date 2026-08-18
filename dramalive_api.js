@@ -519,6 +519,15 @@ app.get("/stream", async (req, res) => {
     } catch (error) { res.status(500).json({ error: true, message: error.message }); }
 });
 
+
+
+// إضافة مسار الدومين الأساسي ليعرض مصفوفة فارغة
+app.get('/', (req, res) => {
+  res.json([]);
+});
+
+
+
 app.post("/get-redirect-data", async (req, res) => {
     try {
         const id_live = req.body.id_live; let url = req.body.url; const agent = req.body.agent || "redirect";
