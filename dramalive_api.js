@@ -764,7 +764,6 @@ const localBaseUrl = `http://localhost:${PORT}/yacintv`;
 
 
 
-
 app.get("/last/:id_live", async (req, res) => {
     try {
         const id_live = req.params.id_live;
@@ -797,38 +796,28 @@ app.get("/last/:id_live", async (req, res) => {
             let redirectResult = await sendRequest(id_live, url, "redirect", "", "getLiveByRedirect");
             let redirectData = redirectResult.decrypted_response;
 
-            // 2. الفحص الشامل (سواء كان agent هو double_redirect أو advanced أو يحتوي على رابط إمبيد)
+            // استخراج تفاصيل الـ URL الداخلي للتحقق
             let currentUrlObj = "";
             if (redirectData && redirectData.data && redirectData.data.url) {
                 currentUrlObj = redirectData.data.url.trim();
             }
 
-            // استخراج الرابط الداخلي لفحصه
             let innerUrlCheck = currentUrlObj;
+            let fetchHeaders = {};
             try {
                 let parsedInner = JSON.parse(currentUrlObj);
                 if (parsedInner.url) innerUrlCheck = parsedInner.url;
+                if (parsedInner.headers) fetchHeaders = parsedInner.headers;
             } catch (e) {}
 
-            // الشرط: إذا كان الـ agent يشير لـ double_redirect أو أن الرابط الداخلي عبارة عن إمبيد ولا يحتوي على صيغة بث نهائية
-            const isAgentDouble = redirectData?.data?.agent === "double_redirect";
-            const isAdvancedEmbed = redirectData?.data?.agent === "advanced" && 
-                                    (innerUrlCheck.includes("embed") || innerUrlCheck.includes("hibridstreaming") || (!innerUrlCheck.includes(".m3u8") && !innerUrlCheck.includes(".mpd")));
+            // 2. الفحص الإجباري لأي رابط إمبيد أو advanced يحتاج لفك
+            const agentType = redirectData?.data?.agent;
+            const isEmbedChannel = innerUrlCheck.includes("embed") || innerUrlCheck.includes("hibridstreaming") || agentType === "double_redirect" || agentType === "advanced";
 
-            if (isAgentDouble || isAdvancedEmbed) {
-                let targetUrl = innerUrlCheck;
-                let fetchHeaders = {};
-
-                try {
-                    let parsed = JSON.parse(currentUrlObj);
-                    targetUrl = parsed.url || currentUrlObj;
-                    fetchHeaders = parsed.headers || {};
-                } catch (e) {}
-
-                // جلب الـ raw_data من موقع الإمبيد
+            if (isEmbedChannel && !innerUrlCheck.includes(".m3u8") && !innerUrlCheck.includes(".mpd")) {
                 let rawData = "";
                 try {
-                    const resHtml = await axios.get(targetUrl, { 
+                    const resHtml = await axios.get(innerUrlCheck, { 
                         headers: fetchHeaders, 
                         timeout: 10000 
                     });
@@ -837,46 +826,15 @@ app.get("/last/:id_live", async (req, res) => {
                     rawData = " ";
                 }
 
-                // 3. إرسال الطلب المزدوج للحصول على الرابط النهائي (.m3u8)
+                // تنفيذ الطلب المزدوج الفعلي لجلب الرابط النهائي
                 const doubleResult = await sendRequest(id_live, currentUrlObj, "double_redirect", rawData, "getLiveByDoubleRedirect");
                 if (doubleResult && doubleResult.decrypted_response) {
                     redirectData = doubleResult.decrypted_response;
                 }
             }
 
-            let finalUrlVal = "";
-            if (redirectData && redirectData.data && redirectData.data.url) {
-                finalUrlVal = redirectData.data.url.trim();
-            }
-
-            if (finalUrlVal !== "1" && finalUrlVal !== "" && finalUrlVal !== "empty") { 
-                return redirectData; 
-            } else {
-                let parsedStreams = [];
-                const mainUrl = liveData.url || ""; const mainAgent = liveData.agent || "";
-                
-                if (mainUrl && mainUrl !== "empty") {
-                    const server = await processServer(id_live, "السيرفر الأساسي", mainUrl, mainAgent);
-                    parsedStreams.push(server);
-                }
-
-                const backupStr = liveData.backup || "";
-                if (backupStr) {
-                    const backupParts = backupStr.split("-;-");
-                    for (let i = 0; i < backupParts.length; i++) {
-                        const part = backupParts[i].trim();
-                        if (!part) continue;
-                        const subParts = part.split("--");
-                        const linkData = subParts[0] ? subParts[0].trim() : "";
-                        const agentData = subParts[1] ? subParts[1].trim() : "";
-                        if (!linkData || linkData === "empty") continue;
-                        const server = await processServer(id_live, `سيرفر ${parsedStreams.length + 1}`, linkData, agentData);
-                        parsedStreams.push(server);
-                    }
-                }
-
-                return { id_live: liveData.id_live || id_live, name: liveData.name || "", img_url: liveData.img_url || "", streams: parsedStreams };
-            }
+            // إرجاع النتيجة نهائياً وبشكل مباشر (لتجنب الوقوع في فخ السيرفر الأساسي القديم)
+            return redirectData;
         });
         
         res.json(data);
