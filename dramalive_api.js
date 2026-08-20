@@ -766,7 +766,6 @@ const localBaseUrl = `http://localhost:${PORT}/yacintv`;
 
 
 
-
 app.get("/last/:id_live", async (req, res) => {
     try {
         const id_live = req.params.id_live;
@@ -799,55 +798,43 @@ app.get("/last/:id_live", async (req, res) => {
             let redirectResult = await sendRequest(id_live, url, "redirect", "", "getLiveByRedirect");
             let redirectData = redirectResult.decrypted_response;
 
-            // ==========================================
-            // 🔄 الحلقة التكرارية لجلب الرابط النهائي تلقائياً
-            // ==========================================
-            let loopCount = 0;
-            while (loopCount < 3) {
-                let currentData = redirectData.data || {};
-                let urlVal = currentData.url || "";
-                
-                let innerUrl = "";
+            // 2. التحقق مما إذا كان الطلب يتطلب Double Redirect بشكل مباشر
+            if (redirectData && redirectData.data && redirectData.data.agent === "double_redirect") {
+                let currentUrlObj = redirectData.data.url;
+                let targetUrl = currentUrlObj;
+                let fetchHeaders = {};
+
                 try {
-                    let parsed = JSON.parse(urlVal);
-                    innerUrl = parsed.url || "";
-                } catch(e) { 
-                    innerUrl = urlVal; 
-                }
+                    let parsed = JSON.parse(currentUrlObj);
+                    targetUrl = parsed.url || currentUrlObj;
+                    fetchHeaders = parsed.headers || {};
+                } catch (e) {}
 
-                // إذا أصبح الرابط يحتوي على صيغة بث مباشر صريحة، نخرج من الحلقة فوراً
-                if (innerUrl.includes(".m3u8") || innerUrl.includes(".mpd")) {
-                    break; 
-                }
-
-                // جلب الـ rawData إذا كان الرابط عبارة عن إمبيد أو صفحة ويب
+                // جلب الـ raw_data من الرابط الداخلي للإمبيد
                 let rawData = "";
                 try {
-                    let parsedObj = JSON.parse(urlVal);
-                    let fetchHeaders = parsedObj.headers || {};
-                    let targetFetchUrl = parsedObj.url || urlVal;
-                    
-                    let resHtml = await axios.get(targetFetchUrl, { headers: fetchHeaders, timeout: 10000 });
+                    const resHtml = await axios.get(targetUrl, { 
+                        headers: fetchHeaders, 
+                        timeout: 10000 
+                    });
                     rawData = typeof resHtml.data === 'string' ? resHtml.data : JSON.stringify(resHtml.data);
-                } catch (e) {
-                    try {
-                        let resHtml = await axios.get(urlVal, { timeout: 10000 });
-                        rawData = typeof resHtml.data === 'string' ? resHtml.data : JSON.stringify(resHtml.data);
-                    } catch (err) {}
+                } catch (err) {
+                    rawData = " ";
                 }
 
-                // إرسال الطلب المزدوج للحصول على الخطوة التالية
-                const doubleResult = await sendRequest(id_live, urlVal, "double_redirect", rawData, "getLiveByDoubleRedirect");
-                redirectData = doubleResult.decrypted_response;
-                loopCount++;
+                // 3. إرسال الطلب المزدوج الفعلي للحصول على الرابط النهائي
+                const doubleResult = await sendRequest(id_live, currentUrlObj, "double_redirect", rawData, "getLiveByDoubleRedirect");
+                if (doubleResult && doubleResult.decrypted_response) {
+                    redirectData = doubleResult.decrypted_response;
+                }
             }
-            // ==========================================
 
             let finalUrlVal = "";
             if (redirectData && redirectData.data && redirectData.data.url) {
                 finalUrlVal = redirectData.data.url.trim();
             }
 
+            // إذا تم جلب الرابط بنجاح بعد الـ Double Redirect
             if (finalUrlVal !== "1" && finalUrlVal !== "" && finalUrlVal !== "empty") { 
                 return redirectData; 
             } else {
@@ -883,7 +870,6 @@ app.get("/last/:id_live", async (req, res) => {
         res.status(error.message.includes("لم يتم العثور") ? 404 : 500).json({ error: true, message: error.message }); 
     }
 });
-
 
 
 
