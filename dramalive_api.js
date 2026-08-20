@@ -529,83 +529,109 @@ app.get('/', (req, res) => {
 
 
 // ==========================================
-// 🔍 مسار البحث عن القنوات في جميع التصنيفات
+// 🔍 مسار البحث عن القنوات في جميع التصنيفات (مُحسّن)
 // ==========================================
+
+// دالة مساعدة لاختيار عناصر عشوائية بسرعة وبدون استهلاك المعالج
+function getRandomChannels(arr, num) {
+    const shuffled = [...arr];
+    let i = arr.length;
+    let min = i - num;
+    let temp, index;
+    while (i-- > min && i >= 0) {
+        index = Math.floor((i + 1) * Math.random());
+        temp = shuffled[index];
+        shuffled[index] = shuffled[i];
+        shuffled[i] = temp;
+    }
+    return shuffled.slice(min);
+}
+
+// دالة لتقسيم المصفوفة إلى دفعات (Chunks)
+function chunkArray(array, size) {
+    const result = [];
+    for (let i = 0; i < array.length; i += size) {
+        result.push(array.slice(i, i + size));
+    }
+    return result;
+}
+
 app.get("/search", async (req, res) => {
     try {
-        const query = req.query.q;
+        const query = req.query.q ? req.query.q.trim() : "";
         const cacheKey = `search_all_channels`;
         
-        // جلب وتجميع جميع القنوات من كل التصنيفات[cite: 1] باستخدام الكاش لمنع الضغط على السيرفر الأساسي
+        // جلب وتجميع جميع القنوات
         const allChannels = await fetchWithCache(cacheKey, async () => {
+            let aggregatedChannels = [];
             
-            // عمل طلبات متزامنة (Concurrent) لجميع الأقسام الموجودة في مصفوفة allTopics[cite: 1]
-            const fetchPromises = allTopics.map(topicObj => {
-                const topic = topicObj.id_topic;
-                const topicCacheKey = `channels_${topic}`;
-                
-                return fetchWithCache(topicCacheKey, async () => {
-                    const postData = {
-                        "user_id": "_82668_1785761367217_notloggedin.com_dramalive3", 
-                        "device_id": "e603540e-ed93-47a3-bec6-a15f7f056604",
-                        "device_api": "28", "version_name": "187", "language": "ar", "timezone": "Europe/Istanbul",
-                        "device_type": "phone", "KEY_ACTIVATED_TYPE": "232425", "store": "direct", "isStoreVersion": false,
-                        "isPremium": false, "isCoupon_active": false, "hideAds": false,
-                        "appCount": "{\"adsFailed\":73,\"adsLoaded\":56,\"adsShowed\":17,\"runCount\":8}",
-                        "mainServer": "http://main.eastgoessouth.online/api/live/livedrama/v13.0.0/", 
-                        "type": "tv", "topic": topic
-                    };
-                    
-                    const encryptedBody = encryptAES(JSON.stringify(postData));
-                    const response = await axios.post("http://live.1spbgmu.com/api/live/livedrama/v13.0.0/getLiveByTopic", encryptedBody, {
-                        headers: { "Content-Type": "text/plain", "User-Agent": "Dalvik/2.1.0 (Linux; U; Android 9; SM-S908E Build/TP1A.220624.014)", "Host": "live.1spbgmu.com", "Connection": "Keep-Alive" },
-                        timeout: 15000
-                    });
-                    
-                    const jsonResponse = JSON.parse(decryptAES(response.data));
-                    let rawChannels = Array.isArray(jsonResponse) ? jsonResponse : (jsonResponse.channels || jsonResponse.live || []);
-                    
-                    return rawChannels.map(ch => ({
-                        type: ch.type || "tv", id_live: ch.id_live || "", name: ch.name || "",
-                        url: ch.url || "", agent: ch.agent || "", backup: ch.backup || "",
-                        img_url: ch.img_url || "", id_topic: ch.id_topic || topic
-                    }));
-                }).catch(err => {
-                    // في حال فشل جلب قسم معين نرجع مصفوفة فارغة
-                    return []; 
-                });
-            });
+            // تقسيم الأقسام الموجودة في allTopics إلى دفعات، كل دفعة تحتوي على 5 أقسام[cite: 1]
+            // هذا يمنع إرسال 40 طلب في نفس اللحظة للسيرفر الأساسي
+            const batches = chunkArray(allTopics, 5); 
 
-            // انتظار اكتمال جميع الطلبات ودمجها في مصفوفة واحدة مسطحة
-            const resultsArray = await Promise.all(fetchPromises);
-            return resultsArray.flat(); 
+            for (const batch of batches) {
+                const batchPromises = batch.map(topicObj => {
+                    const topic = topicObj.id_topic;
+                    const topicCacheKey = `channels_${topic}`;
+                    
+                    return fetchWithCache(topicCacheKey, async () => {
+                        const postData = {
+                            "user_id": "_82668_1785761367217_notloggedin.com_dramalive3", 
+                            "device_id": "e603540e-ed93-47a3-bec6-a15f7f056604",
+                            "device_api": "28", "version_name": "187", "language": "ar", "timezone": "Europe/Istanbul",
+                            "device_type": "phone", "KEY_ACTIVATED_TYPE": "232425", "store": "direct", "isStoreVersion": false,
+                            "isPremium": false, "isCoupon_active": false, "hideAds": false,
+                            "appCount": "{\"adsFailed\":73,\"adsLoaded\":56,\"adsShowed\":17,\"runCount\":8}",
+                            "mainServer": "http://main.eastgoessouth.online/api/live/livedrama/v13.0.0/", 
+                            "type": "tv", "topic": topic
+                        };
+                        
+                        const encryptedBody = encryptAES(JSON.stringify(postData));
+                        const response = await axios.post("http://live.1spbgmu.com/api/live/livedrama/v13.0.0/getLiveByTopic", encryptedBody, {
+                            headers: { "Content-Type": "text/plain", "User-Agent": "Dalvik/2.1.0 (Linux; U; Android 9; SM-S908E Build/TP1A.220624.014)", "Host": "live.1spbgmu.com", "Connection": "Keep-Alive" },
+                            timeout: 15000
+                        });
+                        
+                        const jsonResponse = JSON.parse(decryptAES(response.data));
+                        let rawChannels = Array.isArray(jsonResponse) ? jsonResponse : (jsonResponse.channels || jsonResponse.live || []);
+                        
+                        return rawChannels.map(ch => ({
+                            type: ch.type || "tv", id_live: ch.id_live || "", name: ch.name || "",
+                            url: ch.url || "", agent: ch.agent || "", backup: ch.backup || "",
+                            img_url: ch.img_url || "", id_topic: ch.id_topic || topic
+                        }));
+                    }).catch(err => {
+                        return []; 
+                    });
+                });
+
+                // انتظار اكتمال الدفعة الحالية (5 أقسام) قبل البدء في الدفعة التالية
+                const batchResults = await Promise.all(batchPromises);
+                aggregatedChannels.push(...batchResults.flat());
+            }
+
+            return aggregatedChannels; 
         });
 
-        // 1. حالة إذا كان البحث فارغاً (أو لم يتم إرسال q أصلاً)
-        if (!query || query.trim() === "") {
-            // أخذ نسخة من المصفوفة وخلطها عشوائياً
-            const shuffledChannels = [...allChannels].sort(() => 0.5 - Math.random());
-            // جلب أول 100 قناة فقط بعد الخلط
-            const random100 = shuffledChannels.slice(0, 100);
-            
-            // إرجاع المصفوفة مباشرة (هيكل بسيط)
+        // 1. حالة إذا كان البحث فارغاً
+        if (!query) {
+            // استخدام الخوارزمية السريعة لجلب 100 قناة عشوائية
+            const random100 = getRandomChannels(allChannels, Math.min(100, allChannels.length));
             return res.json(random100);
         }
 
-        // 2. حالة إذا كان هناك كلمة بحث فعلية
+        // 2. حالة البحث الفعلي
+        const lowerQuery = query.toLowerCase();
         const searchResults = allChannels.filter(ch => 
-            ch.name && ch.name.toLowerCase().includes(query.toLowerCase())
+            ch.name && ch.name.toLowerCase().includes(lowerQuery)
         );
 
-        // إرجاع المصفوفة مباشرة (هيكل بسيط)
         res.json(searchResults);
 
     } catch (error) { 
         res.status(500).json({ error: true, message: "حدث خطأ أثناء البحث: " + error.message }); 
     }
 });
-
-
 
 app.post("/get-redirect-data", async (req, res) => {
     try {
