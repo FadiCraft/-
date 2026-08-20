@@ -796,7 +796,6 @@ app.get("/last/:id_live", async (req, res) => {
             let redirectResult = await sendRequest(id_live, url, "redirect", "", "getLiveByRedirect");
             let redirectData = redirectResult.decrypted_response;
 
-            // استخراج تفاصيل الـ URL الداخلي للتحقق
             let currentUrlObj = "";
             if (redirectData && redirectData.data && redirectData.data.url) {
                 currentUrlObj = redirectData.data.url.trim();
@@ -810,7 +809,6 @@ app.get("/last/:id_live", async (req, res) => {
                 if (parsedInner.headers) fetchHeaders = parsedInner.headers;
             } catch (e) {}
 
-            // 2. الفحص الإجباري لأي رابط إمبيد أو advanced يحتاج لفك
             const agentType = redirectData?.data?.agent;
             const isEmbedChannel = innerUrlCheck.includes("embed") || innerUrlCheck.includes("hibridstreaming") || agentType === "double_redirect" || agentType === "advanced";
 
@@ -818,22 +816,26 @@ app.get("/last/:id_live", async (req, res) => {
                 let rawData = "";
                 try {
                     const resHtml = await axios.get(innerUrlCheck, { 
-                        headers: fetchHeaders, 
+                        headers: {
+                            ...fetchHeaders,
+                            "User-Agent": fetchHeaders["User-Agent"] || "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/150.0.0.0 Safari/537.36"
+                        }, 
                         timeout: 10000 
                     });
+                    
+                    // تأكد من أن الـ rawData يتم أخذها كنص صحيح
                     rawData = typeof resHtml.data === 'string' ? resHtml.data : JSON.stringify(resHtml.data);
                 } catch (err) {
-                    rawData = " ";
+                    rawData = innerUrlCheck; // كبديل، إذا فشل الـ get نمرر الرابط نفسه كـ rawData
                 }
 
-                // تنفيذ الطلب المزدوج الفعلي لجلب الرابط النهائي
+                // تنفيذ الطلب المزدوج
                 const doubleResult = await sendRequest(id_live, currentUrlObj, "double_redirect", rawData, "getLiveByDoubleRedirect");
                 if (doubleResult && doubleResult.decrypted_response) {
                     redirectData = doubleResult.decrypted_response;
                 }
             }
 
-            // إرجاع النتيجة نهائياً وبشكل مباشر (لتجنب الوقوع في فخ السيرفر الأساسي القديم)
             return redirectData;
         });
         
@@ -842,7 +844,6 @@ app.get("/last/:id_live", async (req, res) => {
         res.status(error.message.includes("لم يتم العثور") ? 404 : 500).json({ error: true, message: error.message }); 
     }
 });
-
 
 
 app.get("/mach", async (req, res) => {
