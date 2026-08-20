@@ -528,6 +528,74 @@ app.get('/', (req, res) => {
 
 
 
+// ==========================================
+// 🔍 مسار البحث عن القنوات (مع الكاش الذكي)
+// ==========================================
+app.get("/search", async (req, res) => {
+    try {
+        const query = req.query.q;
+        if (!query) {
+            return res.status(400).json({ error: true, message: "يرجى تمرير كلمة البحث في المعلمة q" });
+        }
+
+        // إنشاء مفتاح كاش مخصص لكل كلمة بحث
+        const cacheKey = `search_${query}`;
+
+        const data = await fetchWithCache(cacheKey, async () => {
+            const postData = {
+                "user_id": "_82668_1785761367217_notloggedin.com_dramalive3", 
+                "device_id": "e603540e-ed93-47a3-bec6-a15f7f056604",
+                "device_api": "28", 
+                "version_name": "187", 
+                "language": "ar", 
+                "timezone": "Europe/Istanbul",
+                "device_type": "phone", 
+                "KEY_ACTIVATED_TYPE": "232425", 
+                "store": "direct", 
+                "isStoreVersion": false,
+                "isPremium": false, 
+                "isCoupon_active": false, 
+                "hideAds": false,
+                "appCount": "{\"adsFailed\":73,\"adsLoaded\":56,\"adsShowed\":17,\"runCount\":8}",
+                "mainServer": "http://main.eastgoessouth.online/api/live/livedrama/v13.0.0/", 
+                "type": "tv", 
+                "keyword": query // أو "search_word" بناءً على متطلبات السيرفر الأساسي
+            };
+
+            const encryptedBody = encryptAES(JSON.stringify(postData));
+            
+            // افتراض اسم مسار البحث في السيرفر الأساسي (قد تحتاج لتعديله إلى getLiveBySearch مثلاً)
+            const response = await axios.post("http://live.1spbgmu.com/api/live/livedrama/v13.0.0/searchLive", encryptedBody, {
+                headers: { 
+                    "Content-Type": "text/plain", 
+                    "User-Agent": "Dalvik/2.1.0 (Linux; U; Android 9; SM-S908E Build/TP1A.220624.014)", 
+                    "Host": "live.1spbgmu.com", 
+                    "Connection": "Keep-Alive" 
+                },
+                timeout: 30000
+            });
+
+            const jsonResponse = JSON.parse(decryptAES(response.data));
+            let rawChannels = Array.isArray(jsonResponse) ? jsonResponse : (jsonResponse.channels || jsonResponse.live || jsonResponse.data || []);
+            
+            return rawChannels.map(ch => ({
+                type: ch.type || "tv", 
+                id_live: ch.id_live || "", 
+                name: ch.name || "",
+                url: ch.url || "", 
+                agent: ch.agent || "", 
+                backup: ch.backup || "",
+                img_url: ch.img_url || ""
+            }));
+        });
+        
+        res.json(data);
+    } catch (error) { 
+        res.status(500).json({ error: true, message: error.message }); 
+    }
+});
+
+
 app.post("/get-redirect-data", async (req, res) => {
     try {
         const id_live = req.body.id_live; let url = req.body.url; const agent = req.body.agent || "redirect";
