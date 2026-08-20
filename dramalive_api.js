@@ -765,7 +765,6 @@ const localBaseUrl = `http://localhost:${PORT}/yacintv`;
 
 
 
-
 app.get("/last/:id_live", async (req, res) => {
     try {
         const id_live = req.params.id_live;
@@ -798,10 +797,26 @@ app.get("/last/:id_live", async (req, res) => {
             let redirectResult = await sendRequest(id_live, url, "redirect", "", "getLiveByRedirect");
             let redirectData = redirectResult.decrypted_response;
 
-            // 2. التحقق مما إذا كان الطلب يتطلب Double Redirect بشكل مباشر
-            if (redirectData && redirectData.data && redirectData.data.agent === "double_redirect") {
-                let currentUrlObj = redirectData.data.url;
-                let targetUrl = currentUrlObj;
+            // 2. الفحص الشامل (سواء كان agent هو double_redirect أو advanced أو يحتوي على رابط إمبيد)
+            let currentUrlObj = "";
+            if (redirectData && redirectData.data && redirectData.data.url) {
+                currentUrlObj = redirectData.data.url.trim();
+            }
+
+            // استخراج الرابط الداخلي لفحصه
+            let innerUrlCheck = currentUrlObj;
+            try {
+                let parsedInner = JSON.parse(currentUrlObj);
+                if (parsedInner.url) innerUrlCheck = parsedInner.url;
+            } catch (e) {}
+
+            // الشرط: إذا كان الـ agent يشير لـ double_redirect أو أن الرابط الداخلي عبارة عن إمبيد ولا يحتوي على صيغة بث نهائية
+            const isAgentDouble = redirectData?.data?.agent === "double_redirect";
+            const isAdvancedEmbed = redirectData?.data?.agent === "advanced" && 
+                                    (innerUrlCheck.includes("embed") || innerUrlCheck.includes("hibridstreaming") || (!innerUrlCheck.includes(".m3u8") && !innerUrlCheck.includes(".mpd")));
+
+            if (isAgentDouble || isAdvancedEmbed) {
+                let targetUrl = innerUrlCheck;
                 let fetchHeaders = {};
 
                 try {
@@ -810,7 +825,7 @@ app.get("/last/:id_live", async (req, res) => {
                     fetchHeaders = parsed.headers || {};
                 } catch (e) {}
 
-                // جلب الـ raw_data من الرابط الداخلي للإمبيد
+                // جلب الـ raw_data من موقع الإمبيد
                 let rawData = "";
                 try {
                     const resHtml = await axios.get(targetUrl, { 
@@ -822,7 +837,7 @@ app.get("/last/:id_live", async (req, res) => {
                     rawData = " ";
                 }
 
-                // 3. إرسال الطلب المزدوج الفعلي للحصول على الرابط النهائي
+                // 3. إرسال الطلب المزدوج للحصول على الرابط النهائي (.m3u8)
                 const doubleResult = await sendRequest(id_live, currentUrlObj, "double_redirect", rawData, "getLiveByDoubleRedirect");
                 if (doubleResult && doubleResult.decrypted_response) {
                     redirectData = doubleResult.decrypted_response;
@@ -834,7 +849,6 @@ app.get("/last/:id_live", async (req, res) => {
                 finalUrlVal = redirectData.data.url.trim();
             }
 
-            // إذا تم جلب الرابط بنجاح بعد الـ Double Redirect
             if (finalUrlVal !== "1" && finalUrlVal !== "" && finalUrlVal !== "empty") { 
                 return redirectData; 
             } else {
@@ -870,7 +884,6 @@ app.get("/last/:id_live", async (req, res) => {
         res.status(error.message.includes("لم يتم العثور") ? 404 : 500).json({ error: true, message: error.message }); 
     }
 });
-
 
 
 
