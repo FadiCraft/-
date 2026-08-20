@@ -761,6 +761,12 @@ const localBaseUrl = `http://localhost:${PORT}/yacintv`;
     } catch (error) { res.status(500).json({ error: true, message: "حدث خطأ أثناء معالجة المسار الذكي: " + error.message }); }
 });
 
+
+
+
+
+
+
 app.get("/last/:id_live", async (req, res) => {
     try {
         const id_live = req.params.id_live;
@@ -789,16 +795,54 @@ app.get("/last/:id_live", async (req, res) => {
 
             if (!url || url === "empty") throw new Error("لم يتم العثور على رابط أساسي لهذه القناة");
 
+            // الطلب الأول
             const redirectResult = await sendRequest(id_live, url, "redirect", "", "getLiveByRedirect");
             let redirectData = redirectResult.decrypted_response;
 
-            if (redirectData && redirectData.data && redirectData.data.agent === "double_redirect") {
-                const currentUrl = redirectData.data.url;
+            // ==========================================
+            // 🧠 المنطق الذكي للتمييز وتفعيل ByDoubleRedirect
+            // ==========================================
+            let needsDoubleRedirect = false;
+            let currentUrl = "";
+
+            if (redirectData && redirectData.data && redirectData.data.url) {
+                currentUrl = redirectData.data.url.trim();
+                let innerUrlStr = currentUrl;
+
+                // محاولة فك الـ JSON الداخلي إن وجد لاستخراج الرابط الحقيقي والـ headers
+                try {
+                    let parsedObj = JSON.parse(currentUrl);
+                    if (parsedObj.url) innerUrlStr = parsedObj.url;
+                } catch (e) {}
+
+                // الشروط للتحقق مما إذا كان الرابط يحتاج DoubleRedirect:
+                const agentIsDouble = redirectData.data.agent === "double_redirect";
+                
+                // التحقق من خلو الرابط من صيغ البث أو النصوص المباشرة
+                const hasValidExtension = innerUrlStr.includes(".m3u8") || 
+                                          innerUrlStr.includes(".mpd") || 
+                                          innerUrlStr.includes(".txt");
+                                          // ملاحظة: تم استبعاد .html بناءً على طلبك ليدخل في الـ DoubleRedirect
+
+                // التحقق من وجود كلمات مفتاحية للمشغلات والـ Embeds مثل VOD Embed أو embed
+                const isEmbedOrVOD = innerUrlStr.includes("embed.") || 
+                                     currentUrl.includes("VOD Embed") || 
+                                     currentUrl.includes("x-embed-version");
+
+                if (agentIsDouble || !hasValidExtension || isEmbedOrVOD) {
+                    needsDoubleRedirect = true;
+                }
+            }
+
+            // تنفيذ الـ DoubleRedirect إذا تحققت الشروط
+            if (needsDoubleRedirect && currentUrl && currentUrl !== "1" && currentUrl !== "empty") {
                 let rawData = "";
                 try {
                     let parsedObj = JSON.parse(currentUrl);
                     let fetchHeaders = parsedObj.headers || {};
-                    let resHtml = await axios.get(parsedObj.url, { headers: fetchHeaders, timeout: 10000 });
+                    let targetFetchUrl = parsedObj.url || currentUrl;
+                    
+                    let resHtml = await axios.get(targetFetchUrl, { headers: fetchHeaders, timeout: 10000 });
                     rawData = typeof resHtml.data === 'string' ? resHtml.data : JSON.stringify(resHtml.data);
                 } catch (e) {
                     try {
@@ -806,15 +850,18 @@ app.get("/last/:id_live", async (req, res) => {
                         rawData = typeof resHtml.data === 'string' ? resHtml.data : JSON.stringify(resHtml.data);
                     } catch (err) {}
                 }
+
                 const doubleResult = await sendRequest(id_live, currentUrl, "double_redirect", rawData, "getLiveByDoubleRedirect");
                 redirectData = doubleResult.decrypted_response;
             }
+            // ==========================================
 
             let urlVal = "";
             if (redirectData && redirectData.data && redirectData.data.url) urlVal = redirectData.data.url.trim();
 
-            if (urlVal !== "1" && urlVal !== "" && urlVal !== "empty") { return redirectData; } 
-            else {
+            if (urlVal !== "1" && urlVal !== "" && urlVal !== "empty") { 
+                return redirectData; 
+            } else {
                 let parsedStreams = [];
                 const mainUrl = liveData.url || ""; const mainAgent = liveData.agent || "";
                 
@@ -845,6 +892,9 @@ app.get("/last/:id_live", async (req, res) => {
         res.json(data);
     } catch (error) { res.status(error.message.includes("لم يتم العثور") ? 404 : 500).json({ error: true, message: error.message }); }
 });
+
+
+
 
 app.get("/mach", async (req, res) => {
     try {
