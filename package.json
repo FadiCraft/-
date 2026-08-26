@@ -4,7 +4,7 @@
   "description": "API for scraping movies, seasons, episodes, extracting m3u8 links, and DramaLive streams",
   "main": "dramalive_api.js",
   "engines": {
-    "node": ">=20.0.0"
+    "node": ">=18.0.0"
   },
   "scripts": {
     "start": "node dramalive_api.js",
