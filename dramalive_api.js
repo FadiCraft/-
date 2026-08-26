@@ -160,6 +160,8 @@ async function fetchIntermediateUrl(url, headers = {}, agent = null) {
     } catch (e) { return { success: false, error: e.message }; }
 }
 
+
+
 async function sendRequest(channelId, urlData, agent, encryptedRawData = "", endpoint = "getLiveByRedirect") {
     const postData = {
         "user_id": "_82668_1785761367217_notloggedin.com_dramalive3", "device_id": "e603540e-ed93-47a3-bec6-a15f7f056604",
@@ -173,9 +175,19 @@ async function sendRequest(channelId, urlData, agent, encryptedRawData = "", end
 
     const encryptedBody = encryptAES(JSON.stringify(postData));
 
+    // تحديد الهيدر الصحيح بناءً على نوع الطلب حسب بياناتك الدقيقة
+    const contentType = endpoint === "getLiveByDoubleRedirect" ? "application/json; charset=utf-8" : "text/plain";
+
     const response = await axios.post(`http://redirect.1spbgmu.com/redirect/${endpoint}`, encryptedBody, {
-        headers: { "Content-Type": "text/plain", "User-Agent": "Dalvik/2.1.0 (Linux; U; Android 9; SM-S908E Build/TP1A.220624.014)", "Host": "redirect.1spbgmu.com", "Connection": "Keep-Alive", "Accept-Encoding": "gzip" },
-        timeout: 15000, responseType: "arraybuffer"
+        headers: { 
+            "Content-Type": contentType, 
+            "User-Agent": "Dalvik/2.1.0 (Linux; U; Android 9; SM-S908E Build/TP1A.220624.014)", 
+            "Host": "redirect.1spbgmu.com", 
+            "Connection": "Keep-Alive", 
+            "Accept-Encoding": "gzip" 
+        },
+        timeout: 15000, 
+        responseType: "arraybuffer"
     });
 
     const encryptedResponse = Buffer.from(response.data).toString("utf-8");
@@ -819,31 +831,36 @@ app.get("/last/:id_live", async (req, res) => {
             const redirectResult = await sendRequest(id_live, url, "redirect", "", "getLiveByRedirect");
             let redirectData = redirectResult.decrypted_response;
 
+            // ⚠️ التعديل الجوهري الأول: معالجة Double Redirect بشكل صحيح
             if (redirectData && redirectData.data && redirectData.data.agent === "double_redirect") {
                 const currentUrl = redirectData.data.url;
-                let rawData = "";
-                try {
-                    let parsedObj = JSON.parse(currentUrl);
-                    let fetchHeaders = parsedObj.headers || {};
-                    let resHtml = await axios.get(parsedObj.url, { headers: fetchHeaders, timeout: 10000 });
-                    rawData = typeof resHtml.data === 'string' ? resHtml.data : JSON.stringify(resHtml.data);
-                } catch (e) {
-                    try {
-                        let resHtml = await axios.get(currentUrl, { timeout: 10000 });
-                        rawData = typeof resHtml.data === 'string' ? resHtml.data : JSON.stringify(resHtml.data);
-                    } catch (err) {}
-                }
+                
+                // الحل: نأخذ الاستجابة المشفرة من الطلب الأول كما هي، بدلاً من عمل axios.get للرابط
+                const rawData = redirectResult.encrypted_response ? redirectResult.encrypted_response.trim() : "";
+                
                 const doubleResult = await sendRequest(id_live, currentUrl, "double_redirect", rawData, "getLiveByDoubleRedirect");
                 redirectData = doubleResult.decrypted_response;
             }
 
             let urlVal = "";
-            if (redirectData && redirectData.data && redirectData.data.url) urlVal = redirectData.data.url.trim();
+            let agentVal = "advanced";
+            if (redirectData && redirectData.data && redirectData.data.url) {
+                urlVal = redirectData.data.url.trim();
+                agentVal = redirectData.data.agent || agentVal;
+            }
 
-            if (urlVal !== "1" && urlVal !== "" && urlVal !== "empty") { return redirectData; } 
+            // ⚠️ التعديل الجوهري الثاني: توحيد هيكل الإرجاع (Response Structure) دائماً
+            let parsedStreams = [];
+            
+            if (urlVal !== "1" && urlVal !== "" && urlVal !== "empty") { 
+                // إذا تم فك التشفير بنجاح، نقوم بوضعه داخل الهيكل الموحد
+                const server = await processServer(id_live, "السيرفر الأساسي", urlVal, agentVal);
+                parsedStreams.push(server);
+            } 
             else {
-                let parsedStreams = [];
-                const mainUrl = liveData.url || ""; const mainAgent = liveData.agent || "";
+                // في حال فشل redirect، نلجأ للروابط الاحتياطية (Backup) كما كان الكود يفعل
+                const mainUrl = liveData.url || ""; 
+                const mainAgent = liveData.agent || "";
                 
                 if (mainUrl && mainUrl !== "empty") {
                     const server = await processServer(id_live, "السيرفر الأساسي", mainUrl, mainAgent);
@@ -864,9 +881,16 @@ app.get("/last/:id_live", async (req, res) => {
                         parsedStreams.push(server);
                     }
                 }
-
-                return { id_live: liveData.id_live || id_live, name: liveData.name || "", img_url: liveData.img_url || "", streams: parsedStreams };
             }
+
+            // الهيكل الثابت الذي سيفهمه التطبيق/المشغل لديك دائماً
+            return { 
+                id_live: liveData.id_live || id_live, 
+                name: liveData.name || "", 
+                img_url: liveData.img_url || "", 
+                streams: parsedStreams 
+            };
+            
         });
         
         res.json(data);
