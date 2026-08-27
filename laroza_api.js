@@ -116,11 +116,11 @@ app.get('/api/page', async (req, res) => {
 });
 
 // ---------------------------------------------------------
-// المسار الثاني: مسار مسلسلات رمضان بالهيكل الجديد
+// المسار الثاني: مسار مسلسلات رمضان (بالهيكل الموحد)
 // ---------------------------------------------------------
 app.get('/api/ramadan', async (req, res) => {
     const targetUrl = req.query.url;
-    if (!targetUrl) return res.json([]);
+    if (!targetUrl) return res.json([emptyResponse]);
 
     const cacheKey = req.originalUrl;
     const cachedResponse = getCachedData(cacheKey);
@@ -135,7 +135,7 @@ app.get('/api/ramadan', async (req, res) => {
             signal: AbortSignal.timeout(5000)
         });
 
-        if (!response.ok) return res.json([]);
+        if (!response.ok) return res.json([emptyResponse]);
 
         const html = await response.text();
         const $ = cheerio.load(html);
@@ -147,24 +147,30 @@ app.get('/api/ramadan', async (req, res) => {
             const aTag = $(element);
             const rawUrl = aTag.attr('href') || "";
 
-            // شرط ذكي: استخراج العناصر التي تحتوي على view-serie1.php فقط واستبعاد غيرها
+            // تصفية ذكية: استخراج الروابط التي تحتوي على view-serie1.php فقط
             if (!rawUrl.includes('view-serie1.php')) return true;
 
-            const name = cleanTitle(aTag.text().trim());
-            if (!name) return true;
+            const rawTitle = aTag.text().trim();
+            const title = cleanTitle(rawTitle);
+            if (!title) return true;
 
             const fetchUrl = rawUrl.startsWith('http') ? rawUrl : new URL(rawUrl, baseUrl).href;
             const serieUrl = formatUrl(rawUrl, baseUrl);
+            const id = serieUrl ? crypto.createHash('md5').update(serieUrl).digest('hex') : "";
 
             ramadanList.push({
-                name: name,
-                id: String(ramadanList.length + 1), // ID متسلسل (1, 2, 3...)
-                img: `${host}/floratv/api/image?url=${encodeURIComponent(fetchUrl)}&baseUrl=${encodeURIComponent(baseUrl)}`,
-                url: serieUrl
+                id,
+                title,
+                url: serieUrl,
+                image: `${host}/floratv/api/image?url=${encodeURIComponent(fetchUrl)}&baseUrl=${encodeURIComponent(baseUrl)}`,
+                quality: "",
+                eclip_Num: "",
+                genres: "",
+                imdb: ""
             });
         });
 
-        if (ramadanList.length === 0) return res.json([]);
+        if (ramadanList.length === 0) return res.json([emptyResponse]);
 
         setCachedData(cacheKey, ramadanList);
         res.setHeader('Content-Type', 'application/json; charset=utf-8');
@@ -172,7 +178,7 @@ app.get('/api/ramadan', async (req, res) => {
 
     } catch (error) {
         console.error("Error in /api/ramadan:", error.message);
-        res.json([]);
+        res.json([emptyResponse]);
     }
 });
 
