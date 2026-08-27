@@ -116,11 +116,11 @@ app.get('/api/page', async (req, res) => {
 });
 
 // ---------------------------------------------------------
-// المسار التعديل الثاني: مسار مسلسلات رمضان الذكي
+// المسار الثاني: مسار مسلسلات رمضان بالهيكل الجديد
 // ---------------------------------------------------------
 app.get('/api/ramadan', async (req, res) => {
     const targetUrl = req.query.url;
-    if (!targetUrl) return res.json([emptyResponse]);
+    if (!targetUrl) return res.json([]);
 
     const cacheKey = req.originalUrl;
     const cachedResponse = getCachedData(cacheKey);
@@ -135,7 +135,7 @@ app.get('/api/ramadan', async (req, res) => {
             signal: AbortSignal.timeout(5000)
         });
 
-        if (!response.ok) return res.json([emptyResponse]);
+        if (!response.ok) return res.json([]);
 
         const html = await response.text();
         const $ = cheerio.load(html);
@@ -147,27 +147,24 @@ app.get('/api/ramadan', async (req, res) => {
             const aTag = $(element);
             const rawUrl = aTag.attr('href') || "";
 
-            // تصفية ذكية: تجاهل أي رابط لا يحتوي على view-serie1.php (مثل روابط category.php)
+            // شرط ذكي: استخراج العناصر التي تحتوي على view-serie1.php فقط واستبعاد غيرها
             if (!rawUrl.includes('view-serie1.php')) return true;
 
-            const title = cleanTitle(aTag.text().trim());
+            const name = cleanTitle(aTag.text().trim());
+            if (!name) return true;
+
             const fetchUrl = rawUrl.startsWith('http') ? rawUrl : new URL(rawUrl, baseUrl).href;
             const serieUrl = formatUrl(rawUrl, baseUrl);
-            const id = serieUrl ? crypto.createHash('md5').update(serieUrl).digest('hex') : "";
 
             ramadanList.push({
-                id,
-                title,
-                url: serieUrl,
-                image: `${host}/floratv/api/image?url=${encodeURIComponent(fetchUrl)}&baseUrl=${encodeURIComponent(baseUrl)}`,
-                genres: "",
-                quality: "",
-                imdb: "",
-                eclip_Num: ""
+                name: name,
+                id: String(ramadanList.length + 1), // ID متسلسل (1, 2, 3...)
+                img: `${host}/floratv/api/image?url=${encodeURIComponent(fetchUrl)}&baseUrl=${encodeURIComponent(baseUrl)}`,
+                url: serieUrl
             });
         });
 
-        if (ramadanList.length === 0) return res.json([emptyResponse]);
+        if (ramadanList.length === 0) return res.json([]);
 
         setCachedData(cacheKey, ramadanList);
         res.setHeader('Content-Type', 'application/json; charset=utf-8');
@@ -175,7 +172,7 @@ app.get('/api/ramadan', async (req, res) => {
 
     } catch (error) {
         console.error("Error in /api/ramadan:", error.message);
-        res.json([emptyResponse]);
+        res.json([]);
     }
 });
 
