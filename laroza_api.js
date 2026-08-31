@@ -398,7 +398,7 @@ app.get('/api/episodes', async (req, res) => {
 });
 
 // ---------------------------------------------------------
-// المسار الرابع: استخراج السيرفرات (وضع الرابط الأساسي في النهاية)
+// المسار الرابع: التمييز حسب Subdomain (المباشر أولاً)
 // ---------------------------------------------------------
 app.get('/api/watch', async (req, res) => {
     let targetUrl = req.query.url;
@@ -417,40 +417,60 @@ app.get('/api/watch', async (req, res) => {
         const html = await response.text();
         const $ = cheerio.load(html);
         
-        const extractedServers = [];
-        const listItems = $('ul.WatchList li');
+        const directServers = []; // سيرفرات الدومين الرئيسي (تفتح مباشر)
+        const iframeServers = []; // سيرفرات الدومين الفرعي Subdomain (تفتح داخل iframe)
         const blockedDomains = ['llvpn', 'ads', 'pop', 'blank', 'd0o0d', 'updown.icu'];
 
-        // 1. استخراج السيرفرات من قائمة WatchList
-        listItems.each((index, element) => {
-            const li = $(element);
-            const iframeSrc = li.attr('data-embed-url') || "";
-            const isBlocked = blockedDomains.some(d => iframeSrc.includes(d));
+        const processUrl = (rawUrl) => {
+            if (!rawUrl || !rawUrl.startsWith('http') || rawUrl === targetUrl) return;
 
-            if (iframeSrc && iframeSrc.startsWith('http') && !isBlocked && iframeSrc !== targetUrl) {
-                // منع التكرار داخل القائمة
-                if (!extractedServers.some(s => s.url === iframeSrc)) {
-                    extractedServers.push({ url: iframeSrc });
+            const isBlocked = blockedDomains.some(d => rawUrl.includes(d));
+            if (isBlocked) return;
+
+            try {
+                const hostname = new URL(rawUrl).hostname.replace(/^www\./, '');
+                const parts = hostname.split('.');
+
+                // إذا كان الهوست يتكون من أكثر من جُزأين (مثل rty1.film77.xyz أو mp4.okhd.site)
+                // فهذا يعني أنه Subdomain ويحتاج iframe
+                const isSubdomain = parts.length > 2;
+
+                if (isSubdomain) {
+                    if (!iframeServers.some(s => s.url === rawUrl)) {
+                        iframeServers.push({ url: rawUrl });
+                    }
+                } else {
+                    if (!directServers.some(s => s.url === rawUrl)) {
+                        directServers.push({ url: rawUrl });
+                    }
                 }
+            } catch (e) {
+                // تجنب الأخطاء في حال كان الرابط غير صالح
             }
+        };
+
+        // 1. استخراج من قائمة السيرفرات WatchList
+        $('ul.WatchList li').each((index, element) => {
+            const iframeSrc = $(element).attr('data-embed-url') || "";
+            processUrl(iframeSrc);
         });
 
-        // 2. فحص وجود iframe مباشر في الصفحة إذا لم تُكتشف سيرفرات
-        if (extractedServers.length === 0) {
-            const directIframe = $('iframe').first().attr('src');
-            if (directIframe && directIframe.startsWith('http') && directIframe !== targetUrl) {
-                extractedServers.push({ url: directIframe });
-            }
+        // 2. استخراج من وسوم iframe المباشرة
+        $('iframe').each((index, element) => {
+            const iframeSrc = $(element).attr('src') || "";
+            processUrl(iframeSrc);
+        });
+
+        // 3. التجميع: [ المباشر (Root Domain) -> الـ iframe (Subdomain) -> رابط الصفحة الأصلي ]
+        const finalServers = [...directServers, ...iframeServers];
+
+        if (!finalServers.some(s => s.url === targetUrl)) {
+            finalServers.push({ url: targetUrl });
         }
 
-        // 3. إضافة رابط الصفحة الأصلي (targetUrl) في نهاية القائمة
-        if (!extractedServers.some(s => s.url === targetUrl)) {
-            extractedServers.push({ url: targetUrl });
-        }
-
-        setCachedData(cacheKey, extractedServers);
+        setCachedData(cacheKey, finalServers);
         res.setHeader('Content-Type', 'application/json; charset=utf-8');
-        return res.json(extractedServers);
+        return res.json(finalServers);
 
     } catch (error) {
         console.error("Error in /api/watch:", error.message);
