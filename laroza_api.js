@@ -398,7 +398,7 @@ app.get('/api/episodes', async (req, res) => {
 });
 
 // ---------------------------------------------------------
-// المسار الرابع: استخراج السيرفرات
+// المسار الرابع: استخراج السيرفرات (وضع الرابط الأساسي في النهاية)
 // ---------------------------------------------------------
 app.get('/api/watch', async (req, res) => {
     let targetUrl = req.query.url;
@@ -417,30 +417,40 @@ app.get('/api/watch', async (req, res) => {
         const html = await response.text();
         const $ = cheerio.load(html);
         
-        const validServers = [{ url: targetUrl }];
+        const extractedServers = [];
         const listItems = $('ul.WatchList li');
         const blockedDomains = ['llvpn', 'ads', 'pop', 'blank', 'd0o0d', 'updown.icu'];
 
+        // 1. استخراج السيرفرات من قائمة WatchList
         listItems.each((index, element) => {
             const li = $(element);
             const iframeSrc = li.attr('data-embed-url') || "";
             const isBlocked = blockedDomains.some(d => iframeSrc.includes(d));
 
             if (iframeSrc && iframeSrc.startsWith('http') && !isBlocked && iframeSrc !== targetUrl) {
-                validServers.push({ url: iframeSrc });
+                // منع التكرار داخل القائمة
+                if (!extractedServers.some(s => s.url === iframeSrc)) {
+                    extractedServers.push({ url: iframeSrc });
+                }
             }
         });
 
-        if (validServers.length === 1) {
+        // 2. فحص وجود iframe مباشر في الصفحة إذا لم تُكتشف سيرفرات
+        if (extractedServers.length === 0) {
             const directIframe = $('iframe').first().attr('src');
             if (directIframe && directIframe.startsWith('http') && directIframe !== targetUrl) {
-                validServers.push({ url: directIframe });
+                extractedServers.push({ url: directIframe });
             }
         }
 
-        setCachedData(cacheKey, validServers);
+        // 3. إضافة رابط الصفحة الأصلي (targetUrl) في نهاية القائمة
+        if (!extractedServers.some(s => s.url === targetUrl)) {
+            extractedServers.push({ url: targetUrl });
+        }
+
+        setCachedData(cacheKey, extractedServers);
         res.setHeader('Content-Type', 'application/json; charset=utf-8');
-        return res.json(validServers);
+        return res.json(extractedServers);
 
     } catch (error) {
         console.error("Error in /api/watch:", error.message);
