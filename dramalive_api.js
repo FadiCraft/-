@@ -404,7 +404,7 @@ app.get("/stream", async (req, res) => {
             // 🆕 إضافة السيرفر الأساسي المخصص لقناة beIN Sports 1
             // ==========================================
             if (id_live === "live_tv_beinsport1") {
-                const customServerUrl = "https://olayer.onrender.com/direct/manifest.m3u8?url=http://89.33.13.172/live/16304575049793/43581893985883/445376.m3u8?token=aUdHbU.yUfHafU.X.cXUfUa.yczHbdcU.X.y.TR.m3u8.52642b3aee3685d1a01eadaabdd99b6caa9631b20a86a15b7a5c57d6714e342c...b3JpZW4ubGl2ZQ==";
+                const customServerUrl = "https://olayer.onrender.com/direct/manifest.m3u8?url=http://89.33.13.172/live/16304575049793/43581893985883/445376.m3u8?token=aUdHbU.yHycddd.X.cXUfUa.yczHbdcU.X.y.TR.m3u8.2d6f2788fb01ad7ff9f4db188f2e01b9c9931f5ab4938b7fea13e8a4d7109f48...b3JpZW4ubGl2ZQ==";
                 
                 const customServerPayload = {
                     "result": 0,
