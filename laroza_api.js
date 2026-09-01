@@ -45,7 +45,7 @@ function cleanTitle(title) {
 function formatUrl(url, baseUrl) {
     if (!url) return "";
     let fullUrl = url.startsWith('http') ? url : new URL(url, baseUrl).href;
-    return fullUrl.replace('/watch.php?vid=', '/see.php?vid=');
+    return fullUrl.replace('/video.php?vid=', '/play.php?vid=');
 }
 
 // ---------------------------------------------------------
