@@ -397,6 +397,36 @@ app.get("/stream", async (req, res) => {
         const cacheKey = `stream_full_array_${id_live}`;
 
         const data = await fetchWithCache(cacheKey, async () => {
+            let finalStreamsArray = [];
+            let serverCounter = 1;
+
+            // ==========================================
+            // 🆕 إضافة السيرفر الأساسي المخصص لقناة beIN Sports 1
+            // ==========================================
+            if (id_live === "live_tv_beinsport1") {
+                const customServerUrl = "https://olayer.onrender.com/direct/manifest.m3u8?url=http://89.33.13.172/live/16304575049793/43581893985883/445376.m3u8?token=aUdHbU.yUfHafU.X.cXUfUa.yczHbdcU.X.y.TR.m3u8.52642b3aee3685d1a01eadaabdd99b6caa9631b20a86a15b7a5c57d6714e342c...b3JpZW4ubGl2ZQ==";
+                
+                const customServerPayload = {
+                    "result": 0,
+                    "message": { "en": "operation succeeded", "ar": "تمت العملية بنجاح" },
+                    "name": `سيرفر ${serverCounter}`,
+                    "data": {
+                        "name": `سيرفر ${serverCounter}`,
+                        "url": JSON.stringify({
+                            "url": customServerUrl,
+                            "agent": DEFAULT_USER_AGENT,
+                            "acceptSSL": "1",
+                            "mediatype": "hls",
+                            "headers": { "User-Agent": DEFAULT_USER_AGENT }
+                        }),
+                        "agent": "advanced"
+                    }
+                };
+
+                finalStreamsArray.push(customServerPayload);
+                serverCounter++;
+            }
+
             const postData = {
                 "user_id": "_82668_1785761367217_notloggedin.com_dramalive3", "device_id": "e603540e-ed93-47a3-bec6-a15f7f056604",
                 "device_api": "28", "version_name": "187", "language": "ar", "timezone": "Europe/Istanbul",
@@ -430,9 +460,6 @@ app.get("/stream", async (req, res) => {
                     if (linkData && linkData !== "empty") rawStreams.push({ url: linkData, agent: agentData });
                 }
             }
-
-            let finalStreamsArray = [];
-            let serverCounter = 1;
 
             for (const item of rawStreams) {
                 let serverPayload = null;
