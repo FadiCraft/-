@@ -400,9 +400,6 @@ app.get('/api/episodes', async (req, res) => {
 // ---------------------------------------------------------
 // المسار الرابع: التمييز حسب Subdomain (المباشر أولاً)
 // ---------------------------------------------------------
-// ---------------------------------------------------------
-// المسار الرابع: توليد روابط السيرفرات مبنية على رابط الصفحة الأصلي
-// ---------------------------------------------------------
 app.get('/api/watch', async (req, res) => {
     let targetUrl = req.query.url;
     if (!targetUrl) return res.json([]);
@@ -417,31 +414,57 @@ app.get('/api/watch', async (req, res) => {
             signal: AbortSignal.timeout(5000)
         });
 
-        if (!response.ok) return res.json([{ url: targetUrl }]);
-
         const html = await response.text();
         const $ = cheerio.load(html);
         
-        const finalServers = [];
+        const directServers = []; // سيرفرات الدومين الرئيسي (تفتح مباشر)
+        const iframeServers = []; // سيرفرات الدومين الفرعي Subdomain (تفتح داخل iframe)
+        const blockedDomains = ['llvpn', 'ads', 'pop', 'blank', 'd0o0d', 'updown.icu'];
 
-        // 1. البحث عن كافة عناصر السيرفرات داخل قائمة WatchList
-        const serverElements = $('ul.WatchList li');
+        const processUrl = (rawUrl) => {
+            if (!rawUrl || !rawUrl.startsWith('http') || rawUrl === targetUrl) return;
 
-        if (serverElements.length > 0) {
-            serverElements.each((index, element) => {
-                // استخراج id السيرفر من الخاصية data-embed-id أو الاعتماد على الترتيب (1-indexed)
-                const embedId = $(element).attr('data-embed-id') || (index + 1);
-                
-                // بناء الرابط الداخلي بالصيغة: targetUrl?s=embedId أو &s=embedId إذا كان الرابط يحتوي على query string
-                const separator = targetUrl.includes('?') ? '&' : '?';
-                const serverPageUrl = `${targetUrl}${separator}s=${embedId}`;
+            const isBlocked = blockedDomains.some(d => rawUrl.includes(d));
+            if (isBlocked) return;
 
-                finalServers.push({
-                    url: serverPageUrl
-                });
-            });
-        } else {
-            // في حال عدم وجود قائمة سيرفرات، إرجاع الرابط الأصلي نفسه
+            try {
+                const hostname = new URL(rawUrl).hostname.replace(/^www\./, '');
+                const parts = hostname.split('.');
+
+                // إذا كان الهوست يتكون من أكثر من جُزأين (مثل rty1.film77.xyz أو mp4.okhd.site)
+                // فهذا يعني أنه Subdomain ويحتاج iframe
+                const isSubdomain = parts.length > 2;
+
+                if (isSubdomain) {
+                    if (!iframeServers.some(s => s.url === rawUrl)) {
+                        iframeServers.push({ url: rawUrl });
+                    }
+                } else {
+                    if (!directServers.some(s => s.url === rawUrl)) {
+                        directServers.push({ url: rawUrl });
+                    }
+                }
+            } catch (e) {
+                // تجنب الأخطاء في حال كان الرابط غير صالح
+            }
+        };
+
+        // 1. استخراج من قائمة السيرفرات WatchList
+        $('ul.WatchList li').each((index, element) => {
+            const iframeSrc = $(element).attr('data-embed-url') || "";
+            processUrl(iframeSrc);
+        });
+
+        // 2. استخراج من وسوم iframe المباشرة
+        $('iframe').each((index, element) => {
+            const iframeSrc = $(element).attr('src') || "";
+            processUrl(iframeSrc);
+        });
+
+        // 3. التجميع: [ المباشر (Root Domain) -> الـ iframe (Subdomain) -> رابط الصفحة الأصلي ]
+        const finalServers = [...directServers, ...iframeServers];
+
+        if (!finalServers.some(s => s.url === targetUrl)) {
             finalServers.push({ url: targetUrl });
         }
 
