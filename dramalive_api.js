@@ -406,19 +406,19 @@ app.get("/stream", async (req, res) => {
             // ==========================================
             const customChannelsMap = {
                 // beIN SPORTS 1
-                "live_tv_beinsport1": "https://b1.rhomyrhomyy.workers.dev/stream",
+                "live_tv_beinsport1": "https://website.screenifyplus.workers.dev/?stream=http%3A%2F%2Fre.new-redirect.online%2Flive%2F918454578001%2Findex.m3u8%3Ft%3DGq8OF9icyg9Yen_8WZNXnQ%26e%3D1788516241",
                 "beinsport1": "https://website.screenifyplus.workers.dev/?stream=http%3A%2F%2Fre.new-redirect.online%2Flive%2F918454578001%2Findex.m3u8%3Ft%3DGq8OF9icyg9Yen_8WZNXnQ%26e%3D1788516241",
                 
                 // beIN SPORTS 2
-                "live_tv_beinsport2": "https://b2.rhomyrhomyy.workers.dev/stream",
+                "live_tv_beinsport2": "https://website.screenifyplus.workers.dev/?stream=http%3A%2F%2Fre.new-redirect.online%2Flive%2F69854211%2Findex.m3u8%3Ft%3DYk_In4cp2YwgARZTZKkzQQ%26e%3D1788516295",
                 "beinsport2": "https://website.screenifyplus.workers.dev/?stream=http%3A%2F%2Fre.new-redirect.online%2Flive%2F69854211%2Findex.m3u8%3Ft%3DYk_In4cp2YwgARZTZKkzQQ%26e%3D1788516295",
                 
                 // beIN SPORTS 3
-                "live_tv_beinsport3": "https://olayer-6q40.onrender.com/direct/manifest.m3u8?url=http://89.33.13.172/live/16304575049793/43581893985883/445378.m3u8?token=aUdHbU.ffbUUcd.X.cXUfcd.yczHbdcU.X.y.TR.m3u8.106a943b825d16f0efa18272f9fc192de4aa99ca4f9d47d0553a0ed304ebcf90...b3JpZW4ubGl2ZQ==",
+                "live_tv_beinsport3": "https://website.screenifyplus.workers.dev/?stream=http%3A%2F%2Fre.new-redirect.online%2Flive%2F645587700%2Findex.m3u8%3Ft%3Dsy0Me6yok1DQXfSlJgJ3bA%26e%3D1788516312",
                 "beinsport3": "https://website.screenifyplus.workers.dev/?stream=http%3A%2F%2Fre.new-redirect.online%2Flive%2F645587700%2Findex.m3u8%3Ft%3Dsy0Me6yok1DQXfSlJgJ3bA%26e%3D1788516312",
                 
                 // beIN SPORTS 4
-                "live_tv_beinsport4": "https://website.screenifyplus.workers.dev/?stream=http%3A%2F%2Fre.new-redirect.online%2Flive%2F9787488847%2Findex.m3u8%3Ft%3DeVjcUQwDjkoKZgXNH714xQ%26e%3D1788547189",
+                "live_tv_beinsport4": "https://website.screenifyplus.workers.dev/?stream=http%3A%2F%2Fre.new-redirect.online%2Flive%2F9787488847%2Findex.m3u8%3Ft%3DBgH1t5oSRFkRg8ttSiQwKA%26e%3D1788516331",
                 "beinsport4": "https://website.screenifyplus.workers.dev/?stream=http%3A%2F%2Fre.new-redirect.online%2Flive%2F9787488847%2Findex.m3u8%3Ft%3DBgH1t5oSRFkRg8ttSiQwKA%26e%3D1788516331",
                 
                 // beIN SPORTS 5
@@ -433,9 +433,9 @@ app.get("/stream", async (req, res) => {
                 "live_tv_beinsport7": "https://website.screenifyplus.workers.dev/?stream=http%3A%2F%2Fre.new-redirect.online%2Flive%2F33523510%2Findex.m3u8%3Ft%3DqXbQsExDEXoaCYNPMfk01g%26e%3D1788516388",
                 "beinsport7": "https://website.screenifyplus.workers.dev/?stream=http%3A%2F%2Fre.new-redirect.online%2Flive%2F33523510%2Findex.m3u8%3Ft%3DqXbQsExDEXoaCYNPMfk01g%26e%3D1788516388",
                 
-                // beIN XTRA 1
-                "live_tv_beinsportxtra1": "https://website.screenifyplus.workers.dev/?stream=http%3A%2F%2Fre.new-redirect.online%2Flive%2F33523510%2Findex.m3u8%3Ft%3DowTqimRlXwD3a5AXkBx7xQ%26e%3D1788516422",
-                "beinsportxtra1": "https://website.screenifyplus.workers.dev/?stream=http%3A%2F%2Fre.new-redirect.online%2Flive%2F33523510%2Findex.m3u8%3Ft%3DowTqimRlXwD3a5AXkBx7xQ%26e%3D1788516422"
+                // beIN XTRA 2
+                "live_tv_beinsportxtra2": "https://website.screenifyplus.workers.dev/?stream=http%3A%2F%2Fre.new-redirect.online%2Flive%2F33523510%2Findex.m3u8%3Ft%3DowTqimRlXwD3a5AXkBx7xQ%26e%3D1788516422",
+                "beinsportxtra2": "https://website.screenifyplus.workers.dev/?stream=http%3A%2F%2Fre.new-redirect.online%2Flive%2F33523510%2Findex.m3u8%3Ft%3DowTqimRlXwD3a5AXkBx7xQ%26e%3D1788516422"
             };
 
             const customServerUrl = customChannelsMap[id_live];
