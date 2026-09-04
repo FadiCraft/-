@@ -406,19 +406,19 @@ app.get("/stream", async (req, res) => {
             // ==========================================
             const customChannelsMap = {
                 // beIN SPORTS 1
-                "live_tv_beinsport1": "https://website.screenifyplus.workers.dev/?stream=http%3A%2F%2Fre.new-redirect.online%2Flive%2F918454578001%2Findex.m3u8%3Ft%3DGq8OF9icyg9Yen_8WZNXnQ%26e%3D1788516241",
+                "live_tv_beinsport1": "https://website.screenifyplus.workers.dev/?stream=http%3A%2F%2Fre.new-redirect.online%2Flive%2F918454578001%2Findex.m3u8%3Ft%3DY86VZz6bnYL6ctzDhXDwiw%26e%3D1788547088",
                 "beinsport1": "https://website.screenifyplus.workers.dev/?stream=http%3A%2F%2Fre.new-redirect.online%2Flive%2F918454578001%2Findex.m3u8%3Ft%3DGq8OF9icyg9Yen_8WZNXnQ%26e%3D1788516241",
                 
                 // beIN SPORTS 2
-                "live_tv_beinsport2": "https://website.screenifyplus.workers.dev/?stream=http%3A%2F%2Fre.new-redirect.online%2Flive%2F69854211%2Findex.m3u8%3Ft%3DYk_In4cp2YwgARZTZKkzQQ%26e%3D1788516295",
+                "live_tv_beinsport2": "https://website.screenifyplus.workers.dev/?stream=http%3A%2F%2Fre.new-redirect.online%2Flive%2F69854211%2Findex.m3u8%3Ft%3DsJtnIj-YMHi6tX5pYuacsA%26e%3D1788547154",
                 "beinsport2": "https://website.screenifyplus.workers.dev/?stream=http%3A%2F%2Fre.new-redirect.online%2Flive%2F69854211%2Findex.m3u8%3Ft%3DYk_In4cp2YwgARZTZKkzQQ%26e%3D1788516295",
                 
                 // beIN SPORTS 3
-                "live_tv_beinsport3": "https://website.screenifyplus.workers.dev/?stream=http%3A%2F%2Fre.new-redirect.online%2Flive%2F645587700%2Findex.m3u8%3Ft%3Dsy0Me6yok1DQXfSlJgJ3bA%26e%3D1788516312",
+                "live_tv_beinsport3": "https://website.screenifyplus.workers.dev/?stream=http%3A%2F%2Fre.new-redirect.online%2Flive%2F645587700%2Findex.m3u8%3Ft%3Dbsk9s8zKnKR1cuiYkaldMg%26e%3D1788547175",
                 "beinsport3": "https://website.screenifyplus.workers.dev/?stream=http%3A%2F%2Fre.new-redirect.online%2Flive%2F645587700%2Findex.m3u8%3Ft%3Dsy0Me6yok1DQXfSlJgJ3bA%26e%3D1788516312",
                 
                 // beIN SPORTS 4
-                "live_tv_beinsport4": "https://website.screenifyplus.workers.dev/?stream=http%3A%2F%2Fre.new-redirect.online%2Flive%2F9787488847%2Findex.m3u8%3Ft%3DBgH1t5oSRFkRg8ttSiQwKA%26e%3D1788516331",
+                "live_tv_beinsport4": "https://website.screenifyplus.workers.dev/?stream=http%3A%2F%2Fre.new-redirect.online%2Flive%2F9787488847%2Findex.m3u8%3Ft%3DeVjcUQwDjkoKZgXNH714xQ%26e%3D1788547189",
                 "beinsport4": "https://website.screenifyplus.workers.dev/?stream=http%3A%2F%2Fre.new-redirect.online%2Flive%2F9787488847%2Findex.m3u8%3Ft%3DBgH1t5oSRFkRg8ttSiQwKA%26e%3D1788516331",
                 
                 // beIN SPORTS 5
