@@ -414,7 +414,7 @@ app.get("/stream", async (req, res) => {
                 "beinsport2": "https://website.screenifyplus.workers.dev/?stream=http%3A%2F%2Fre.new-redirect.online%2Flive%2F69854211%2Findex.m3u8%3Ft%3DYk_In4cp2YwgARZTZKkzQQ%26e%3D1788516295",
                 
                 // beIN SPORTS 3
-                "live_tv_beinsport3": "https://b3.rhomyrhomyy.workers.dev/stream",
+                "live_tv_beinsport3": "https://olayer-6q40.onrender.com/direct/manifest.m3u8?url=http://89.33.13.172/live/16304575049793/43581893985883/445378.m3u8?token=aUdHbU.ffbUUcd.X.cXUfcd.yczHbdcU.X.y.TR.m3u8.106a943b825d16f0efa18272f9fc192de4aa99ca4f9d47d0553a0ed304ebcf90...b3JpZW4ubGl2ZQ==",
                 "beinsport3": "https://website.screenifyplus.workers.dev/?stream=http%3A%2F%2Fre.new-redirect.online%2Flive%2F645587700%2Findex.m3u8%3Ft%3Dsy0Me6yok1DQXfSlJgJ3bA%26e%3D1788516312",
                 
                 // beIN SPORTS 4
