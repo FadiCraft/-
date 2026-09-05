@@ -1,14 +1,14 @@
 const express = require('express');
 const cheerio = require('cheerio');
 const crypto = require('crypto');
-const puppeteer = require('puppeteer'); // تم نقلها للأعلى لتنظيم الكود
+const puppeteer = require('puppeteer'); 
 
 const app = express();
 const PORT = process.env.PORT || 3000;
 
 app.use(express.json());
 
-// الهيكل الثابت الموحد لجميع المسارات مع إضافة حقل رقم الحلقة
+// الهيكل الثابت الموحد لجميع المسارات 
 const emptyResponse = {
     id: "",
     title: "",
@@ -21,7 +21,7 @@ const emptyResponse = {
 };
 
 // ---------------------------------------------------------
-// المسار الأول: استخراج الأفلام والمسلسلات
+// المسار الأول: استخراج الأفلام والمسلسلات (الهيكل الجديد)
 // ---------------------------------------------------------
 app.get('/api/page', async (req, res) => {
     const targetUrl = req.query.url;
@@ -39,53 +39,50 @@ app.get('/api/page', async (req, res) => {
         const $ = cheerio.load(html);
         const moviesList = [];
 
-        $('div.Small--Box:not(.Season)').each((index, element) => {
+        // الاستهداف الجديد للعناصر
+        $('div.entry-box').each((index, element) => {
             const box = $(element);
             
-            // استخراج الرابط (يدعم الأقسام العادية وقسم نتفليكس)
-            const movieUrl = box.find('a.recent--block').attr('href') || box.find('a').first().attr('href') || "";
+            // استخراج الرابط 
+            const movieUrl = box.find('h3 a').attr('href') || box.find('.entry-image a').attr('href') || "";
             
             // استخراج العنوان
-            const title = box.find('h3.title').text().trim() || "";
+            const title = box.find('h3 a').text().trim() || "";
             
             // استخراج الصورة
-            const imgTag = box.find('div.Poster img');
+            const imgTag = box.find('.entry-image img');
             const imageUrl = imgTag.attr('data-src') || imgTag.attr('data-lazy-src') || imgTag.attr('src') || "";
 
-            // 📌 التعديل الجديد: استخراج النص كاملاً من div.number
-            let eclip_Num = box.find('div.number').text().trim();
-            // لضمان وجود مسافة بين الكلمة والرقم إذا كانا متصلين (مثلاً "حلقة5" تصبح "حلقة 5")
-            eclip_Num = eclip_Num.replace(/([^\d\s])(\d)/g, '$1 $2').replace(/(\d)([^\d\s])/g, '$1 $2').trim();
+            // استخراج رقم الحلقة من الكلاس الجديد label series
+            let eclip_Num = "";
+            const seriesLabel = box.find('.label.series').text().trim();
+            if (seriesLabel) {
+                // استخراج الرقم فقط وإضافة كلمة حلقة (أو يمكنك ترك الرقم فقط حسب تصميم تطبيقك)
+                const num = seriesLabel.replace(/\D/g, '');
+                if(num) eclip_Num = "حلقة " + num; 
+            }
 
-            let genre = "";
-            let quality = "";
-            let imdbRating = "";
+            // استخراج التصنيف (مثال: افلام اجنبي)
+            let genre = box.find('.badge-light').text().trim() || "";
+            let quality = box.find('.badge-secondary').text().trim() || ""; 
 
-            box.find('ul.liList li').each((i, li) => {
-                const text = $(li).text().trim();
-                if ($(li).hasClass('imdbRating')) {
-                    imdbRating = text.replace(/[^\d.]/g, ''); 
-                } else {
-                    if (/p|web|bluray|hd|cam/i.test(text)) {
-                        quality = text;
-                    } else {
-                        if (!genre) genre = text;
-                    }
-                }
-            });
+            // استخراج تقييم IMDB
+            let imdbRating = box.find('.label.rating').text().replace(/[^\d.]/g, '') || "";
 
             const id = movieUrl ? crypto.createHash('md5').update(movieUrl).digest('hex') : "";
 
-            moviesList.push({
-                id, 
-                title, 
-                url: movieUrl, 
-                image: imageUrl, 
-                genres: genre, 
-                quality, 
-                imdb: imdbRating,
-                eclip_Num: eclip_Num // سيعرض الآن "حلقة 6" أو "1 موسم" أو سيكون فارغاً للأفلام
-            });
+            if (title && movieUrl) {
+                moviesList.push({
+                    id, 
+                    title, 
+                    url: movieUrl, 
+                    image: imageUrl, 
+                    genres: genre, 
+                    quality, 
+                    imdb: imdbRating,
+                    eclip_Num: eclip_Num 
+                });
+            }
         });
 
         if (moviesList.length === 0) return res.json([emptyResponse]);
@@ -96,8 +93,9 @@ app.get('/api/page', async (req, res) => {
         res.json([emptyResponse]);
     }
 });
+
 // ---------------------------------------------------------
-// المسار الثاني: استخراج المواسم
+// المسار الثاني: استخراج المواسم (الهيكل الجديد)
 // ---------------------------------------------------------
 app.get('/api/seasons', async (req, res) => {
     const targetUrl = req.query.url;
@@ -115,27 +113,27 @@ app.get('/api/seasons', async (req, res) => {
         const $ = cheerio.load(html);
         const seasonsList = [];
 
-        $('section.allseasonss div.Small--Box.Season').each((index, element) => {
-            const box = $(element);
+        // الاستهداف الجديد للمواسم
+        $('#series-episodes .widget-body a').each((index, element) => {
+            const el = $(element);
 
-            const seasonUrl = box.find('a').attr('href') || "";
-            const title = box.find('h3.title').text().trim() || "";
+            const seasonUrl = el.attr('href') || "";
+            const title = el.text().trim() || "";
             
-            const imgTag = box.find('div.Poster img');
-            const imageUrl = imgTag.attr('data-src') || imgTag.attr('data-lazy-src') || imgTag.attr('src') || "";
-
             const id = seasonUrl ? crypto.createHash('md5').update(seasonUrl).digest('hex') : "";
 
-            seasonsList.push({
-                id: id,
-                title: title,
-                url: seasonUrl,
-                image: imageUrl,
-                genres: "",
-                quality: "",
-                imdb: "",
-                eclip_Num: "" // فارغ في حالة المواسم
-            });
+            if (title && seasonUrl) {
+                seasonsList.push({
+                    id: id,
+                    title: title,
+                    url: seasonUrl,
+                    image: "", // المواسم في الهيكل الجديد لا تحتوي على صور منفصلة
+                    genres: "",
+                    quality: "",
+                    imdb: "",
+                    eclip_Num: "" 
+                });
+            }
         });
 
         if (seasonsList.length === 0) return res.json([emptyResponse]);
@@ -149,7 +147,7 @@ app.get('/api/seasons', async (req, res) => {
 });
 
 // ---------------------------------------------------------
-// المسار الثالث: استخراج الحلقات
+// المسار الثالث: استخراج الحلقات (الهيكل الجديد)
 // ---------------------------------------------------------
 app.get('/api/episodes', async (req, res) => {
     const targetUrl = req.query.url;
@@ -167,33 +165,35 @@ app.get('/api/episodes', async (req, res) => {
         const $ = cheerio.load(html);
         const episodesList = [];
 
-        // استهداف روابط الحلقات من داخل الكلاس المخصص
-        $('section.allepcont.getMoreByScroll a').each((index, element) => {
+        // الاستهداف الجديد للحلقات
+        $('div.bg-primary2').each((index, element) => {
             const el = $(element);
             
-            const url = el.attr('href') || "";
-            const title = el.find('.ep-info h2').text().trim() || "";
+            const titleElement = el.find('h2 a');
+            const url = titleElement.attr('href') || "";
+            const title = titleElement.text().trim() || "";
             
-            // استخراج الصورة مع دعم التحميل المتأخر (Lazy Load)
-            const imgTag = el.find('.image img');
+            const imgTag = el.find('picture img');
             const image = imgTag.attr('data-src') || imgTag.attr('data-lazy-src') || imgTag.attr('src') || "";
             
-            // استخراج رقم الحلقة فقط
-            const epNumText = el.find('.epnum').text().trim();
-            const eclip_Num = epNumText.replace(/\D/g, '') || ""; 
+            // استخراج رقم الحلقة من الـ alt الخاص بالصورة (مثال: alt="19 : الحلقة ")
+            const altText = imgTag.attr('alt') || "";
+            const eclip_Num = altText.replace(/\D/g, '') || ""; 
 
             const id = url ? crypto.createHash('md5').update(url).digest('hex') : "";
 
-            episodesList.push({
-                id: id,
-                title: title,
-                url: url,
-                image: image,
-                genres: "", 
-                quality: "", 
-                imdb: "",
-                eclip_Num: eclip_Num 
-            });
+            if (title && url) {
+                episodesList.push({
+                    id: id,
+                    title: title,
+                    url: url,
+                    image: image,
+                    genres: "", 
+                    quality: "", 
+                    imdb: "",
+                    eclip_Num: eclip_Num 
+                });
+            }
         });
 
         if (episodesList.length === 0) return res.json([emptyResponse]);
@@ -206,27 +206,15 @@ app.get('/api/episodes', async (req, res) => {
     }
 });
 
-
-
-
-
-
-
-
-
-
-
-
-
 // ---------------------------------------------------------
-// المسار السريع لاستخراج السيرفرات كلها بصيغة JSON
+// المسار الرابع: استخراج السيرفرات بصيغة JSON (طريقة جديدة وأسرع)
 // ---------------------------------------------------------
-
 app.get('/api/watch', async (req, res) => {
     let targetUrl = req.query.url;
     
-    // إرجاع مصفوفة فارغة بصيغة JSON في حال عدم وجود رابط أو خطأ
     if (!targetUrl) return res.json([]);
+    
+    // إضافة /watch/ لفتح صفحة المشاهدة والسيرفرات
     if (!targetUrl.endsWith('/watch/')) {
         targetUrl = targetUrl.replace(/\/$/, '') + '/watch/';
     }
@@ -238,73 +226,28 @@ app.get('/api/watch', async (req, res) => {
 
         const pageHtml = await pageResponse.text();
         const $ = cheerio.load(pageHtml);
+        const validServers = [];
 
-        // 1. استخراج الـ ID
-        const firstServerBtn = $('.server--item').first();
-        const postId = firstServerBtn.attr('data-id') || "";
-        if (!postId) return res.json([]);
+        // قائمة الدومينات المحظورة (كما هي في الكود القديم)
+        const blockedDomains = ['llvpn', 'ads', 'pop', 'blank','d0o0d','d0o0d.com', 'updown.icu', 'updown'];
 
-        // 2. استخراج جميع أرقام السيرفرات المتاحة (مع استثناء الأول 0)
-        const serverIndexes = [];
-        $('.server--item').each((i, el) => {
-            const serverNum = $(el).attr('data-server');
-            if (i > 0 && serverNum !== "0") { 
-                serverIndexes.push(serverNum);
+        // الاستهداف المباشر لأزرار السيرفرات بناءً على الهيكل الجديد (بدون الحاجة لطلبات Ajax)
+        $('.watch-top .server-btn').each((i, el) => {
+            const serverLink = $(el).attr('data-link');
+
+            if (serverLink && serverLink.startsWith('http')) {
+                const isBlocked = blockedDomains.some(d => serverLink.includes(d));
+                
+                if (!isBlocked) {
+                    validServers.push({
+                        url: serverLink
+                    });
+                }
             }
         });
 
-        // ==========================================
-        // 💡 التعديل هنا: استخراج الدومين الفعّال ديناميكياً
-        // ==========================================
-        // نأخذ الرابط النهائي من الاستجابة (هذا يفيد في حال كان هناك Redirect لدومين جديد)
-        const finalUrl = new URL(pageResponse.url);
-        const currentDomain = finalUrl.origin; // سيجلب مثلاً: https://topcinemaa.co أو أي دومين جديد
-        
-        // بناء رابط الـ Ajax الخاص بالسيرفرات بناءً على الدومين الحالي
-        const serverUrl = `${currentDomain}/wp-content/themes/movies2023/Ajaxat/Single/Server.php`;
-        // ==========================================
-
-        const validServers = []; // مصفوفة لتخزين السيرفرات الشغالة
-        
-        for (let i of serverIndexes) {
-            try {
-                const serverResponse = await fetch(serverUrl, {
-                    method: 'POST',
-                    body: `id=${postId}&i=${i}`,
-                    headers: {
-                        "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8",
-                        "X-Requested-With": "XMLHttpRequest",
-                        "Referer": pageResponse.url // تم التعديل لتمرير الرابط الصحيح كـ Referer
-                    }
-                });
-
-                const serverHtml = await serverResponse.text();
-                const $$ = cheerio.load(serverHtml);
-                const iframeSrc = $$('iframe').attr('src') || "";
-
-                // 4. التحقق مما إذا كان الرابط صالحاً 
-                const blockedDomains = ['llvpn', 'ads', 'pop', 'blank','d0o0d','d0o0d.com', 'updown.icu', 'updown'];
-                const isBlocked = blockedDomains.some(d => iframeSrc.includes(d));
-
-                if (iframeSrc && iframeSrc.startsWith('http') && !isBlocked) {
-                    console.log(`✅ تم العثور على سيرفر صالح: ${iframeSrc}`);
-                    validServers.push({
-                        url: iframeSrc
-                    });
-                }
-            } catch (err) {
-                console.error(`⚠️ خطأ أثناء فحص السيرفر رقم ${i}:`, err.message);
-            }
-        }
-
-        // 5. إرجاع النتائج بصيغة JSON
         res.setHeader('Content-Type', 'application/json; charset=utf-8');
-        if (validServers.length > 0) {
-            return res.json(validServers);
-        } else {
-            console.log("❌ لم يتم العثور على أي سيرفر صالح.");
-            return res.json([]);
-        }
+        return res.json(validServers);
 
     } catch (error) {
         console.error("خطأ عام:", error.message);
@@ -312,22 +255,17 @@ app.get('/api/watch', async (req, res) => {
     }
 });
 
-
-
-
 // إضافة مسار الدومين الأساسي ليعرض مصفوفة فارغة
 app.get('/', (req, res) => {
   res.json([]);
 });
 
-
 // ---------------------------------------------------------
-// المسار الرابع: استخراج الحلقة التالية
+// المسار الخامس: استخراج الحلقة التالية (تم تركه كما هو لعدم وجود تغيير مذكور فيه)
 // ---------------------------------------------------------
 app.get('/api/next-episode', async (req, res) => {
     const targetUrl = req.query.url;
 
-    // إرجاع قوسين فارغين إذا لم يتم تمرير رابط
     if (!targetUrl) return res.json([]);
 
     try {
@@ -340,28 +278,23 @@ app.get('/api/next-episode', async (req, res) => {
         const html = await response.text();
         const $ = cheerio.load(html);
 
-        // استهداف زر الحلقة التالية
         const nextElement = $('a.next');
 
-        // التحقق من وجود الحلقة التالية
         if (nextElement.length > 0) {
             const nextUrl = nextElement.attr('href') || "";
             const nextNumber = nextElement.find('strong').text().trim() || "";
             const nextTitle = nextElement.find('.txtDiv span').text().trim() || "";
 
-            // إذا كان الرابط موجوداً، نقوم بإرجاع البيانات
             if (nextUrl) {
-                // إعداد الرأس (Header) لدعم اللغة العربية وتنسيق JSON
                 res.setHeader('Content-Type', 'application/json; charset=utf-8');
                 return res.json([{
-                    title: nextTitle,    // اسم الحلقة (مثلاً: الحلقة التالية)
-                    number: nextNumber,  // رقم الحلقة (مثلاً: 2)
-                    url: nextUrl         // رابط الحلقة
+                    title: nextTitle,    
+                    number: nextNumber,  
+                    url: nextUrl         
                 }]);
             }
         }
 
-        // إذا لم يتم العثور على العنصر أو الرابط، يطبع القوسين فقط
         return res.json([]);
 
     } catch (error) {
