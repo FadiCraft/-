@@ -108,7 +108,7 @@ app.get('/api/page', async (req, res) => {
 });
 
 // ---------------------------------------------------------
-// المسار الثاني: استخراج المواسم (الهيكل الجديد)
+// المسار الثاني: استخراج المواسم (دعم الهيكل الجديد مع الصور)
 // ---------------------------------------------------------
 app.get('/api/seasons', async (req, res) => {
     const targetUrl = req.query.url;
@@ -126,8 +126,17 @@ app.get('/api/seasons', async (req, res) => {
         const $ = cheerio.load(html);
         const seasonsList = [];
 
-        // الاستهداف الجديد للمواسم
-        $('#series-episodes .widget-body a').each((index, element) => {
+        // استخراج الصورة العامة للمسلسل/الموسم من الميتا تاج لتطبيقها على المواسم
+        const metaImage = $('meta[name="twitter:image"]').attr('content') || 
+                          $('meta[property="og:image"]').attr('content') || 
+                          "";
+
+        // استهداف المواسم فقط 
+        // الهيكل القديم: a داخل .widget-body
+        // الهيكل الجديد: a.btn داخل .widget-body (لتجنب قسم الحلقات)
+        
+        // سنقوم بالبحث في كل العناصر التي تطابق مواصفات أزرار المواسم
+        $('#series-episodes .widget-body a.btn, #series-episodes .widget-body > a').each((index, element) => {
             const el = $(element);
 
             const seasonUrl = el.attr('href') || "";
@@ -140,7 +149,7 @@ app.get('/api/seasons', async (req, res) => {
                     id: id,
                     title: title,
                     url: seasonUrl,
-                    image: "", // المواسم في الهيكل الجديد لا تحتوي على صور منفصلة
+                    image: metaImage, // وضع الصورة المستخرجة من המيتا تاج
                     genres: "",
                     quality: "",
                     imdb: "",
@@ -149,16 +158,46 @@ app.get('/api/seasons', async (req, res) => {
             }
         });
 
+        // إذا كان الموقع يستخدم هيكل جديد تماماً للمواسم (مثل الهيكل الموحد للمسلسلات)
+        if(seasonsList.length === 0){
+             $('a:contains("الموسم")').each((index, element) => {
+                const el = $(element);
+                const seasonUrl = el.attr('href') || "";
+                let title = el.text().trim() || "";
+                
+                // تنظيف العنوان إذا كان طويلاً جداً
+                if (title.length > 50) return; // غالباً ليس زر موسم
+
+                const id = seasonUrl ? crypto.createHash('md5').update(seasonUrl).digest('hex') : "";
+
+                if (title && seasonUrl && seasonUrl.includes('series')) {
+                    seasonsList.push({
+                        id: id,
+                        title: title,
+                        url: seasonUrl,
+                        image: metaImage, 
+                        genres: "",
+                        quality: "",
+                        imdb: "",
+                        eclip_Num: "" 
+                    });
+                }
+             });
+        }
+
+
         if (seasonsList.length === 0) return res.json([emptyResponse]);
 
+        // إزالة التكرارات إن وجدت بناءً على الرابط
+        const uniqueSeasons = Array.from(new Map(seasonsList.map(item => [item.url, item])).values());
+
         res.setHeader('Content-Type', 'application/json; charset=utf-8');
-        res.json(seasonsList);
+        res.json(uniqueSeasons);
 
     } catch (error) {
         res.json([emptyResponse]);
     }
 });
-
 // ---------------------------------------------------------
 // المسار الثالث: استخراج الحلقات (الهيكل الجديد)
 // ---------------------------------------------------------
