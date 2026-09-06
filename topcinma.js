@@ -108,7 +108,7 @@ app.get('/api/page', async (req, res) => {
 });
 
 // ---------------------------------------------------------
-// المسار الثاني: استخراج المواسم (دعم الهيكل الجديد مع الصور)
+// المسار الثاني: استخراج المواسم (دعم الهيكل الجديد مع إضافة موسم وهمي إذا لم توجد مواسم)
 // ---------------------------------------------------------
 app.get('/api/seasons', async (req, res) => {
     const targetUrl = req.query.url;
@@ -131,17 +131,11 @@ app.get('/api/seasons', async (req, res) => {
                           $('meta[property="og:image"]').attr('content') || 
                           "";
 
-        // استهداف المواسم فقط 
-        // الهيكل القديم: a داخل .widget-body
-        // الهيكل الجديد: a.btn داخل .widget-body (لتجنب قسم الحلقات)
-        
-        // سنقوم بالبحث في كل العناصر التي تطابق مواصفات أزرار المواسم
+        // 1. محاولة استخراج المواسم من القائمة الجانبية (الهيكل الجديد والقديم)
         $('#series-episodes .widget-body a.btn, #series-episodes .widget-body > a').each((index, element) => {
             const el = $(element);
-
             const seasonUrl = el.attr('href') || "";
             const title = el.text().trim() || "";
-            
             const id = seasonUrl ? crypto.createHash('md5').update(seasonUrl).digest('hex') : "";
 
             if (title && seasonUrl) {
@@ -149,7 +143,7 @@ app.get('/api/seasons', async (req, res) => {
                     id: id,
                     title: title,
                     url: seasonUrl,
-                    image: metaImage, // وضع الصورة المستخرجة من המيتا تاج
+                    image: metaImage, 
                     genres: "",
                     quality: "",
                     imdb: "",
@@ -158,15 +152,14 @@ app.get('/api/seasons', async (req, res) => {
             }
         });
 
-        // إذا كان الموقع يستخدم هيكل جديد تماماً للمواسم (مثل الهيكل الموحد للمسلسلات)
+        // 2. طبقة حماية احتياطية: البحث عن أي رابط يحتوي على "الموسم" و "series"
         if(seasonsList.length === 0){
              $('a:contains("الموسم")').each((index, element) => {
                 const el = $(element);
                 const seasonUrl = el.attr('href') || "";
                 let title = el.text().trim() || "";
                 
-                // تنظيف العنوان إذا كان طويلاً جداً
-                if (title.length > 50) return; // غالباً ليس زر موسم
+                if (title.length > 50) return; 
 
                 const id = seasonUrl ? crypto.createHash('md5').update(seasonUrl).digest('hex') : "";
 
@@ -185,6 +178,25 @@ app.get('/api/seasons', async (req, res) => {
              });
         }
 
+        // 3. الفكرة الجديدة: إذا لم يتم العثور على أي مواسم، نقوم بإنشاء "موسم وهمي"
+        if (seasonsList.length === 0) {
+            // نتحقق أولاً أن الصفحة تحتوي فعلاً على حلقات (حتى لا ننشئ موسم لفيلم أو صفحة فارغة)
+            const hasEpisodes = $('div.bg-primary2').length > 0 || $('.item__contents.is__episode').length > 0;
+            
+            if (hasEpisodes) {
+                const fakeId = crypto.createHash('md5').update(targetUrl).digest('hex');
+                seasonsList.push({
+                    id: fakeId,
+                    title: "الموسم الاول", // اسم الموسم الوهمي
+                    url: targetUrl, // نمرر نفس رابط الصفحة الحالية
+                    image: metaImage,
+                    genres: "",
+                    quality: "",
+                    imdb: "",
+                    eclip_Num: "" 
+                });
+            }
+        }
 
         if (seasonsList.length === 0) return res.json([emptyResponse]);
 
