@@ -21,7 +21,7 @@ const emptyResponse = {
 };
 
 // ---------------------------------------------------------
-// المسار الأول: استخراج الأفلام والمسلسلات (الهيكل الجديد)
+// المسار الأول: استخراج الأفلام والمسلسلات (يدعم الهيكلين القديم والجديد)
 // ---------------------------------------------------------
 app.get('/api/page', async (req, res) => {
     const targetUrl = req.query.url;
@@ -39,34 +39,47 @@ app.get('/api/page', async (req, res) => {
         const $ = cheerio.load(html);
         const moviesList = [];
 
-        // الاستهداف الجديد للعناصر
-        $('div.entry-box').each((index, element) => {
+        // استهداف الكلاس القديم (div.entry-box) والكلاس الجديد (.item__contents)
+        $('div.entry-box, .item__contents').each((index, element) => {
             const box = $(element);
             
-            // استخراج الرابط 
-            const movieUrl = box.find('h3 a').attr('href') || box.find('.entry-image a').attr('href') || "";
+            // استخراج الرابط (من الهيكل الجديد أو القديم)
+            const movieUrl = box.find('a.movie__block').attr('href') || 
+                             box.find('h3 a').attr('href') || 
+                             box.find('.entry-image a').attr('href') || 
+                             box.find('> a').attr('href') || "";
             
             // استخراج العنوان
-            const title = box.find('h3 a').text().trim() || "";
+            const title = box.find('.post__info h3').text().trim() || 
+                          box.find('h3 a').text().trim() || 
+                          box.find('a.movie__block').attr('title') || "";
             
             // استخراج الصورة
-            const imgTag = box.find('.entry-image img');
-            const imageUrl = imgTag.attr('data-src') || imgTag.attr('data-lazy-src') || imgTag.attr('src') || "";
+            const imgTag = box.find('.post__image img, .entry-image img');
+            const imageUrl = imgTag.attr('data-src') || 
+                             imgTag.attr('data-lazy-src') || 
+                             imgTag.attr('src') || "";
 
-            // استخراج رقم الحلقة من الكلاس الجديد label series
+            // استخراج رقم الحلقة
             let eclip_Num = "";
-            const seriesLabel = box.find('.label.series').text().trim();
-            if (seriesLabel) {
-                // استخراج الرقم فقط وإضافة كلمة حلقة (أو يمكنك ترك الرقم فقط حسب تصميم تطبيقك)
-                const num = seriesLabel.replace(/\D/g, '');
+            const newSeriesLabel = box.find('.__number').text().trim(); // الهيكل الجديد
+            const oldSeriesLabel = box.find('.label.series').text().trim(); // الهيكل القديم
+            
+            const seriesText = newSeriesLabel || oldSeriesLabel;
+            if (seriesText) {
+                // استخراج الأرقام فقط وإضافة كلمة "حلقة"
+                const num = seriesText.replace(/\D/g, '');
                 if(num) eclip_Num = "حلقة " + num; 
             }
 
-            // استخراج التصنيف (مثال: افلام اجنبي)
-            let genre = box.find('.badge-light').text().trim() || "";
-            let quality = box.find('.badge-secondary').text().trim() || ""; 
+            // استخراج التصنيف (تمت إضافة تنظيف للمسافات والأسطر الفارغة لتناسب الهيكل الجديد)
+            let genre = box.find('.post__category, .badge-light').text().trim();
+            genre = genre.replace(/\s+/g, ' ').trim() || ""; 
 
-            // استخراج تقييم IMDB
+            // استخراج الجودة (أخذ أول جودة في حال وجود أكثر من واحدة في الهيكل الجديد)
+            let quality = box.find('.__quality, .badge-secondary').first().text().trim() || ""; 
+
+            // استخراج تقييم IMDB (إن وجد)
             let imdbRating = box.find('.label.rating').text().replace(/[^\d.]/g, '') || "";
 
             const id = movieUrl ? crypto.createHash('md5').update(movieUrl).digest('hex') : "";
