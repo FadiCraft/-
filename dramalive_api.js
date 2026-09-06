@@ -397,6 +397,51 @@ app.get("/stream", async (req, res) => {
         const cacheKey = `stream_full_array_${id_live}`;
 
         const data = await fetchWithCache(cacheKey, async () => {
+            let finalStreamsArray = [];
+            let serverCounter = 1;
+
+            // ==========================================
+            // 🆕 إضافة السيرفر الأساسي المخصص للقنوات المختارة
+            // ==========================================
+            const customChannelsMap = {
+                // beIN SPORTS 1
+                "live_tv_beinsport1": "https://alyaassta.hsinnzaer5.workers.dev/?stream=http%3A%2F%2Fre.new-redirect.online%2Flive%2F918454578001%2Findex.m3u8%3Ft%3Dd6zSFm8nIReOdX5zVooZdA%26e%3D1788722265",
+                "beinsport1": "https://website.screenifyplus.workers.dev/?stream=http%3A%2F%2Fre.new-redirect.online%2Flive%2F918454578001%2Findex.m3u8%3Ft%3DGq8OF9icyg9Yen_8WZNXnQ%26e%3D1788516241",
+                
+                // beIN SPORTS 2
+                "live_tv_beinsport2": "https://alyaassta.hsinnzaer5.workers.dev/?stream=http%3A%2F%2Fre.new-redirect.online%2Flive%2F69854211%2Findex.m3u8%3Ft%3DdvY3Ifo9aCIcOnrfOVJ6XA%26e%3D1788722279",
+                "beinsport2": "https://website.screenifyplus.workers.dev/?stream=http%3A%2F%2Fre.new-redirect.online%2Flive%2F69854211%2Findex.m3u8%3Ft%3DYk_In4cp2YwgARZTZKkzQQ%26e%3D1788516295",
+                
+                // beIN SPORTS 3
+                "live_tv_beinsport3": "https://alyaassta.hsinnzaer5.workers.dev/?stream=http%3A%2F%2Fre.new-redirect.online%2Flive%2F645587700%2Findex.m3u8%3Ft%3DtsyIDQuZAyMiulhConficA%26e%3D1788722519",
+                "beinsport3": "https://website.screenifyplus.workers.dev/?stream=http%3A%2F%2Fre.new-redirect.online%2Flive%2F645587700%2Findex.m3u8%3Ft%3Dsy0Me6yok1DQXfSlJgJ3bA%26e%3D1788516312",
+                
+                  };
+
+            const customServerUrl = customChannelsMap[id_live];
+
+            if (customServerUrl) {
+                const customServerPayload = {
+                    "result": 0,
+                    "message": { "en": "operation succeeded", "ar": "تمت العملية بنجاح" },
+                    "name": `سيرفر ${serverCounter}`,
+                    "data": {
+                        "name": `سيرفر ${serverCounter}`,
+                        "url": JSON.stringify({
+                            "url": customServerUrl,
+                            "agent": DEFAULT_USER_AGENT,
+                            "acceptSSL": "1",
+                            "mediatype": "hls",
+                            "headers": { "User-Agent": DEFAULT_USER_AGENT }
+                        }),
+                        "agent": "advanced"
+                    }
+                };
+
+                finalStreamsArray.push(customServerPayload);
+                serverCounter++;
+            }
+
             const postData = {
                 "user_id": "_82668_1785761367217_notloggedin.com_dramalive3", "device_id": "e603540e-ed93-47a3-bec6-a15f7f056604",
                 "device_api": "28", "version_name": "187", "language": "ar", "timezone": "Europe/Istanbul",
@@ -430,9 +475,6 @@ app.get("/stream", async (req, res) => {
                     if (linkData && linkData !== "empty") rawStreams.push({ url: linkData, agent: agentData });
                 }
             }
-
-            let finalStreamsArray = [];
-            let serverCounter = 1;
 
             for (const item of rawStreams) {
                 let serverPayload = null;
@@ -518,7 +560,6 @@ app.get("/stream", async (req, res) => {
         res.json(data);
     } catch (error) { res.status(500).json({ error: true, message: error.message }); }
 });
-
 
 
 // إضافة مسار الدومين الأساسي ليعرض مصفوفة فارغة
