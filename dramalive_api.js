@@ -821,6 +821,14 @@ app.all("/resolve", async (req, res) => {
     } catch (error) { res.status(500).json({ error: true, message: error.message }); }
 });
 
+
+// إضافة مسار الدومين الأساسي ليعرض مصفوفة فارغة
+app.get('/', (req, res) => {
+  res.json([]);
+});
+
+
+
 app.get("/extract", async (req, res) => {
     try {
         const targetUrl = req.query.url;
