@@ -201,6 +201,13 @@ app.get('/api/watch', async (req, res) => {
     } catch (error) { return res.json([]); }
 });
 
+
+// إضافة مسار الدومين الأساسي ليعرض مصفوفة فارغة
+app.get('/', (req, res) => {
+  res.json([]);
+});
+
+
 app.get('/api/next-episode', async (req, res) => {
     const targetUrl = req.query.url;
     if (!targetUrl) return res.json([]);
