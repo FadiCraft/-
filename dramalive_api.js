@@ -12,42 +12,33 @@ app.use(express.urlencoded({ extended: true }));
 // ==========================================
 // 🆕 إعداد نظام الكاش الذكي (Request Coalescing)
 // ==========================================
-// توحيد المدة الافتراضية للكاش لتكون 300 ثانية (5 دقائق)، وتنظيف الكاش المنتهي كل 60 ثانية
-const appCache = new NodeCache({ stdTTL: 300, checkperiod: 60 });
-// خريطة لحفظ الطلبات قيد التنفيذ لمنع التكرار (Thundering herd prevention)
+// مدة الكاش 600 ثانية (10 دقائق) للحفاظ على الـ RAM، وتنظيف الذاكرة كل دقيقتين
+const appCache = new NodeCache({ stdTTL: 600, checkperiod: 120 });
 const activeRequests = new Map();
 
 /**
  * دالة مساعدة لجلب البيانات من الكاش أو من السيرفر بطلب واحد فقط للكل
  */
 async function fetchWithCache(cacheKey, fetchFunction) {
-    // 1. إذا كانت البيانات موجودة في الكاش، أرجعها مباشرة
     if (appCache.has(cacheKey)) {
         return appCache.get(cacheKey);
     }
-
-    // 2. إذا كان هناك طلب حالي يتم تنفيذه لنفس المفتاح، انتظر نتيجته (الـ 49 طلب سينتظرون هنا)
     if (activeRequests.has(cacheKey)) {
         return await activeRequests.get(cacheKey);
     }
-
-    // 3. إذا لم يكن هناك طلب قيد التنفيذ، أنشئ طلباً جديداً (الطلب الأول فقط سينفذ هذا الجزء)
     const requestPromise = (async () => {
         try {
             const data = await fetchFunction();
-            appCache.set(cacheKey, data); // الحفظ في الكاش لمدة 5 دقائق افتراضياً
+            appCache.set(cacheKey, data); 
             return data;
         } catch (error) {
             throw error;
         } finally {
-            // تنظيف الطلب من الخريطة بعد الانتهاء (سواء نجح أو فشل)
             activeRequests.delete(cacheKey);
         }
     })();
 
-    // حفظ الطلب في الخريطة ليتمكن الآخرون من انتظاره
     activeRequests.set(cacheKey, requestPromise);
-    
     return await requestPromise;
 }
 
@@ -268,124 +259,41 @@ async function processServer(id_live, serverName, urlData, agentData) {
     return createServerObject(serverName, urlData, agentData, {}, null, null);
 }
 
+// دالة مساعدة لجلب قنوات قسم معين (لتجنب تكرار الكود)
+async function fetchChannelsByTopic(topic) {
+    const postData = {
+        "user_id": "_82668_1785761367217_notloggedin.com_dramalive3", "device_id": "e603540e-ed93-47a3-bec6-a15f7f056604",
+        "device_api": "28", "version_name": "187", "language": "ar", "timezone": "Europe/Istanbul",
+        "device_type": "phone", "KEY_ACTIVATED_TYPE": "232425", "store": "direct", "isStoreVersion": false,
+        "isPremium": false, "isCoupon_active": false, "hideAds": false,
+        "appCount": "{\"adsFailed\":73,\"adsLoaded\":56,\"adsShowed\":17,\"runCount\":8}",
+        "mainServer": "http://main.eastgoessouth.online/api/live/livedrama/v13.0.0/", "type": "tv", "topic": topic
+    };
+    const encryptedBody = encryptAES(JSON.stringify(postData));
+    const response = await axios.post("http://live.1spbgmu.com/api/live/livedrama/v13.0.0/getLiveByTopic", encryptedBody, {
+        headers: { "Content-Type": "text/plain", "User-Agent": "Dalvik/2.1.0 (Linux; U; Android 9; SM-S908E Build/TP1A.220624.014)", "Host": "live.1spbgmu.com", "Connection": "Keep-Alive" },
+        timeout: 15000
+    });
+    const jsonResponse = JSON.parse(decryptAES(response.data));
+    let rawChannels = Array.isArray(jsonResponse) ? jsonResponse : (jsonResponse.channels || jsonResponse.live || []);
+    return rawChannels.map(ch => ({
+        type: ch.type || "tv", id_live: ch.id_live || "", name: ch.name || "",
+        url: ch.url || "", agent: ch.agent || "", backup: ch.backup || "",
+        img_url: ch.img_url || "", id_topic: ch.id_topic || topic
+    }));
+}
+
 // ==========================================
-// 1. مسار جلب القنوات (مع الكاش الذكي 5 دقائق)
+// 1. مسار جلب القنوات (مع الكاش الذكي 10 دقائق)
 // ==========================================
 app.get("/channels", async (req, res) => {
     try {
         const topic = req.query.topic || "arabic_sport";
         const cacheKey = `channels_${topic}`;
-        
-        const data = await fetchWithCache(cacheKey, async () => {
-            const postData = {
-                "user_id": "_82668_1785761367217_notloggedin.com_dramalive3", "device_id": "e603540e-ed93-47a3-bec6-a15f7f056604",
-                "device_api": "28", "version_name": "187", "language": "ar", "timezone": "Europe/Istanbul",
-                "device_type": "phone", "KEY_ACTIVATED_TYPE": "232425", "store": "direct", "isStoreVersion": false,
-                "isPremium": false, "isCoupon_active": false, "hideAds": false,
-                "appCount": "{\"adsFailed\":73,\"adsLoaded\":56,\"adsShowed\":17,\"runCount\":8}",
-                "mainServer": "http://main.eastgoessouth.online/api/live/livedrama/v13.0.0/", "type": "tv", "topic": topic
-            };
-            const encryptedBody = encryptAES(JSON.stringify(postData));
-            const response = await axios.post("http://live.1spbgmu.com/api/live/livedrama/v13.0.0/getLiveByTopic", encryptedBody, {
-                headers: { "Content-Type": "text/plain", "User-Agent": "Dalvik/2.1.0 (Linux; U; Android 9; SM-S908E Build/TP1A.220624.014)", "Host": "live.1spbgmu.com", "Connection": "Keep-Alive" },
-                timeout: 30000
-            });
-            const jsonResponse = JSON.parse(decryptAES(response.data));
-            let rawChannels = Array.isArray(jsonResponse) ? jsonResponse : (jsonResponse.channels || jsonResponse.live || []);
-            return rawChannels.map(ch => ({
-                type: ch.type || "tv", id_live: ch.id_live || "", name: ch.name || "",
-                url: ch.url || "", agent: ch.agent || "", backup: ch.backup || "",
-                img_url: ch.img_url || "", id_topic: ch.id_topic || topic
-            }));
-        });
-        
+        const data = await fetchWithCache(cacheKey, () => fetchChannelsByTopic(topic));
         res.json(data);
     } catch (error) { res.status(500).json({ error: true, message: error.message }); }
 });
-
-async function getOrFetchStreams(id_live, baseUrl) {
-    const cacheKey = `stream_full_${id_live}`;
-    
-    return fetchWithCache(cacheKey, async () => {
-        const postData = {
-            "user_id": "_82668_1785761367217_notloggedin.com_dramalive3", "device_id": "e603540e-ed93-47a3-bec6-a15f7f056604",
-            "device_api": "28", "version_name": "187", "language": "ar", "timezone": "Europe/Istanbul",
-            "device_type": "phone", "KEY_ACTIVATED_TYPE": "232425", "store": "direct", "isStoreVersion": false,
-            "isPremium": false, "isCoupon_active": false, "hideAds": false,
-            "appCount": "{\"adsFailed\":468,\"adsLoaded\":240,\"adsShowed\":116,\"runCount\":54}",
-            "mainServer": "http://main.eastgoessouth.online/api/live/livedrama/v13.0.0/",
-            "type": "tv", "id_live": id_live, "id": id_live, "live_id": id_live, "channel_id": id_live
-        };
-
-        const encryptedBody = encryptAES(JSON.stringify(postData));
-        const response = await axios.post("http://live.1spbgmu.com/api/live/livedrama/v13.0.0/getLiveAllStreamsById", encryptedBody, {
-            headers: { "Content-Type": "text/plain", "User-Agent": "Dalvik/2.1.0 (Linux; U; Android 9; SM-S908E Build/TP1A.220624.014)", "Host": "live.1spbgmu.com", "Connection": "Keep-Alive" },
-            timeout: 15000, responseType: "arraybuffer" 
-        });
-
-        const decryptedResponse = decryptAES(Buffer.from(response.data).toString("utf-8"));
-        const rawJson = JSON.parse(decryptedResponse);
-        const liveData = rawJson.live || {};
-
-        let rawStreams = [];
-        if (liveData.url && liveData.url !== "empty") rawStreams.push({ url: liveData.url, agent: liveData.agent || "" });
-        if (liveData.backup) {
-            const backupParts = liveData.backup.split("-;-");
-            for (const part of backupParts) {
-                const trimmedPart = part.trim();
-                if (!trimmedPart) continue;
-                const subParts = trimmedPart.split("--");
-                const linkData = subParts[0] ? subParts[0].trim() : "";
-                const agentData = subParts[1] ? subParts[1].trim() : "";
-                if (linkData && linkData !== "empty") rawStreams.push({ url: linkData, agent: agentData });
-            }
-        }
-
-        let allServerResults = [];
-        for (const item of rawStreams) {
-            if (item.agent === "redirect") {
-                try {
-                    const redirectPayload = {
-                        "user_id": "_82668_1785761367217_notloggedin.com_dramalive3", "device_id": "e603540e-ed93-47a3-bec6-a15f7f056604",
-                        "device_api": "28", "version_name": "187", "language": "ar", "timezone": "Europe/Istanbul",
-                        "device_type": "phone", "KEY_ACTIVATED_TYPE": "232425", "store": "direct", "isStoreVersion": false,
-                        "isPremium": false, "isCoupon_active": false, "hideAds": false,
-                        "appCount": "{\"adsFailed\":468,\"adsLoaded\":240,\"adsShowed\":116,\"runCount\":54}",
-                        "mainServer": "http://main.eastgoessouth.online/api/live/livedrama/v13.0.0/",
-                        "id": id_live, "url": item.url, "agent": "redirect"
-                    };
-
-                    const encryptedRedirectBody = encryptAES(JSON.stringify(redirectPayload));
-                    const redirectRes = await axios.post("http://redirect.1spbgmu.com/redirect/getLiveByRedirect", encryptedRedirectBody, {
-                        headers: { "Content-Type": "text/plain", "User-Agent": "Dalvik/2.1.0 (Linux; U; Android 9; SM-S908E Build/TP1A.220624.014)", "Host": "redirect.1spbgmu.com", "Connection": "Keep-Alive" },
-                        timeout: 15000, responseType: "arraybuffer"
-                    });
-
-                    const decryptedStr = decryptAES(Buffer.from(redirectRes.data).toString("utf-8"));
-                    const parsedRedirect = JSON.parse(decryptedStr);
-
-                    if (parsedRedirect && parsedRedirect.data && parsedRedirect.data.agent === "double_redirect") {
-                        const originalUrlString = parsedRedirect.data.url; 
-                        parsedRedirect.original_raw_url = originalUrlString;
-                        const serverIndex = allServerResults.length;
-                        let innerObj = {};
-                        try { innerObj = JSON.parse(originalUrlString); } catch (e) { innerObj = { url: originalUrlString }; }
-                        innerObj.url = `${baseUrl}/double_redirect?id_live=${encodeURIComponent(id_live)}&s=${serverIndex}`;
-                        parsedRedirect.data.url = JSON.stringify(innerObj);
-                    }
-                    allServerResults.push(parsedRedirect);
-                } catch (err) {}
-            } else {
-                let innerUrlString = item.url;
-                if (!innerUrlString.startsWith("{")) {
-                    innerUrlString = JSON.stringify({ "url": item.url, "agent": item.agent || DEFAULT_AGENT, "acceptSSL": "1", "headers": { "User-Agent": item.agent || DEFAULT_AGENT } });
-                }
-                allServerResults.push({ "result": 0, "message": { "en": "operation succeeded", "ar": "تمت العملية بنجاح" }, "data": { "url": innerUrlString, "agent": "advanced" } });
-            }
-        }
-        return allServerResults;
-    });
-}
 
 const DEFAULT_USER_AGENT = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/149.0.0.0 Safari/537.36";
 
@@ -401,11 +309,19 @@ app.get("/stream", async (req, res) => {
             let serverCounter = 1;
 
             // ==========================================
-            // 🆕 إضافة السيرفر الأساسي المخصص لقناة beIN Sports 1
+            // 🆕 إدارة الروابط المخصصة لقنوات beIN Sports
             // ==========================================
-            if (id_live === "live_tv_beinsport1") {
-                const customServerUrl = "https://olayer-uzgv.onrender.com/direct/manifest.m3u8?url=http://89.33.13.177/live/16304575049793/43581893985883/405948.m3u8?token=aUdHbU.baXdza.y.baXbay.yczHbdcU.X.y.TR.m3u8.c05a9f13c23703541424e712885555e79e19db5f0b1a0d1560ff7078fea0a3d3...b3JpZW4ubGl2ZQ==";
-                
+            const customBeinUrls = {
+                "live_tv_beinsport1": "https://olayer-uzgv.onrender.com/direct/manifest.m3u8?url=http://89.33.13.177/live/16304575049793/43581893985883/405948.m3u8?token=aUdHbU.baXdza.y.baXbay.yczHbdcU.X.y.TR.m3u8.c05a9f13c23703541424e712885555e79e19db5f0b1a0d1560ff7078fea0a3d3...b3JpZW4ubGl2ZQ==",
+                "live_tv_beinsport2": "", // ضع الرابط الخاص بقناة 2 هنا
+                "live_tv_beinsport3": "", // ضع الرابط الخاص بقناة 3 هنا
+                "live_tv_beinsport4": ""  // ضع الرابط الخاص بقناة 4 هنا
+            };
+
+            const targetCustomUrl = customBeinUrls[id_live];
+
+            // سيتم تنفيذ هذا الشرط فقط إذا كان الرابط موجوداً وليس فارغاً
+            if (targetCustomUrl && targetCustomUrl.trim() !== "") {
                 const customServerPayload = {
                     "result": 0,
                     "message": { "en": "operation succeeded", "ar": "تمت العملية بنجاح" },
@@ -413,7 +329,7 @@ app.get("/stream", async (req, res) => {
                     "data": {
                         "name": `سيرفر ${serverCounter}`,
                         "url": JSON.stringify({
-                            "url": customServerUrl,
+                            "url": targetCustomUrl.trim(),
                             "agent": DEFAULT_USER_AGENT,
                             "acceptSSL": "1",
                             "mediatype": "hls",
@@ -546,35 +462,14 @@ app.get("/stream", async (req, res) => {
     } catch (error) { res.status(500).json({ error: true, message: error.message }); }
 });
 
-
-
-// إضافة مسار الدومين الأساسي ليعرض مصفوفة فارغة
 app.get('/', (req, res) => {
   res.json([]);
 });
 
-
-
 // ==========================================
-// 🔍 مسار البحث عن القنوات في جميع التصنيفات (مُحسّن)
+// 🔍 مسار البحث عن القنوات في جميع التصنيفات (مُحسّن لمعالجة الـ CPU)
 // ==========================================
 
-// دالة مساعدة لاختيار عناصر عشوائية بسرعة وبدون استهلاك المعالج
-function getRandomChannels(arr, num) {
-    const shuffled = [...arr];
-    let i = arr.length;
-    let min = i - num;
-    let temp, index;
-    while (i-- > min && i >= 0) {
-        index = Math.floor((i + 1) * Math.random());
-        temp = shuffled[index];
-        shuffled[index] = shuffled[i];
-        shuffled[i] = temp;
-    }
-    return shuffled.slice(min);
-}
-
-// دالة لتقسيم المصفوفة إلى دفعات (Chunks)
 function chunkArray(array, size) {
     const result = [];
     for (let i = 0; i < array.length; i += size) {
@@ -586,14 +481,17 @@ function chunkArray(array, size) {
 app.get("/search", async (req, res) => {
     try {
         const query = req.query.q ? req.query.q.trim() : "";
-        const cacheKey = `search_all_channels`;
         
-        // جلب وتجميع جميع القنوات
+        // إذا كان البحث فارغاً، يتم استدعاء "قسم واحد فقط" (الأكثر مشاهدة) لتوفير الضغط الهائل
+        if (!query) {
+            const firstTopic = allTopics[0].id_topic; 
+            const data = await fetchWithCache(`channels_${firstTopic}`, () => fetchChannelsByTopic(firstTopic));
+            return res.json(data);
+        }
+
+        const cacheKey = `search_all_channels`;
         const allChannels = await fetchWithCache(cacheKey, async () => {
             let aggregatedChannels = [];
-            
-            // تقسيم الأقسام الموجودة في allTopics إلى دفعات، كل دفعة تحتوي على 5 أقسام[cite: 1]
-            // هذا يمنع إرسال 40 طلب في نفس اللحظة للسيرفر الأساسي
             const batches = chunkArray(allTopics, 5); 
 
             for (const batch of batches) {
@@ -601,38 +499,11 @@ app.get("/search", async (req, res) => {
                     const topic = topicObj.id_topic;
                     const topicCacheKey = `channels_${topic}`;
                     
-                    return fetchWithCache(topicCacheKey, async () => {
-                        const postData = {
-                            "user_id": "_82668_1785761367217_notloggedin.com_dramalive3", 
-                            "device_id": "e603540e-ed93-47a3-bec6-a15f7f056604",
-                            "device_api": "28", "version_name": "187", "language": "ar", "timezone": "Europe/Istanbul",
-                            "device_type": "phone", "KEY_ACTIVATED_TYPE": "232425", "store": "direct", "isStoreVersion": false,
-                            "isPremium": false, "isCoupon_active": false, "hideAds": false,
-                            "appCount": "{\"adsFailed\":73,\"adsLoaded\":56,\"adsShowed\":17,\"runCount\":8}",
-                            "mainServer": "http://main.eastgoessouth.online/api/live/livedrama/v13.0.0/", 
-                            "type": "tv", "topic": topic
-                        };
-                        
-                        const encryptedBody = encryptAES(JSON.stringify(postData));
-                        const response = await axios.post("http://live.1spbgmu.com/api/live/livedrama/v13.0.0/getLiveByTopic", encryptedBody, {
-                            headers: { "Content-Type": "text/plain", "User-Agent": "Dalvik/2.1.0 (Linux; U; Android 9; SM-S908E Build/TP1A.220624.014)", "Host": "live.1spbgmu.com", "Connection": "Keep-Alive" },
-                            timeout: 15000
-                        });
-                        
-                        const jsonResponse = JSON.parse(decryptAES(response.data));
-                        let rawChannels = Array.isArray(jsonResponse) ? jsonResponse : (jsonResponse.channels || jsonResponse.live || []);
-                        
-                        return rawChannels.map(ch => ({
-                            type: ch.type || "tv", id_live: ch.id_live || "", name: ch.name || "",
-                            url: ch.url || "", agent: ch.agent || "", backup: ch.backup || "",
-                            img_url: ch.img_url || "", id_topic: ch.id_topic || topic
-                        }));
-                    }).catch(err => {
+                    return fetchWithCache(topicCacheKey, () => fetchChannelsByTopic(topic)).catch(err => {
                         return []; 
                     });
                 });
 
-                // انتظار اكتمال الدفعة الحالية (5 أقسام) قبل البدء في الدفعة التالية
                 const batchResults = await Promise.all(batchPromises);
                 aggregatedChannels.push(...batchResults.flat());
             }
@@ -640,14 +511,6 @@ app.get("/search", async (req, res) => {
             return aggregatedChannels; 
         });
 
-        // 1. حالة إذا كان البحث فارغاً
-        if (!query) {
-            // استخدام الخوارزمية السريعة لجلب 100 قناة عشوائية
-            const random100 = getRandomChannels(allChannels, Math.min(100, allChannels.length));
-            return res.json(random100);
-        }
-
-        // 2. حالة البحث الفعلي
         const lowerQuery = query.toLowerCase();
         const searchResults = allChannels.filter(ch => 
             ch.name && ch.name.toLowerCase().includes(lowerQuery)
@@ -787,7 +650,7 @@ app.get("/live_id/:id", async (req, res) => {
         const cacheKey = `smart_live_${id_live}`;
         
         const data = await fetchWithCache(cacheKey, async () => {
-const localBaseUrl = `http://localhost:${PORT}/yacintv`;
+            const localBaseUrl = `http://localhost:${PORT}/yacintv`;
             try {
                 const redirectResponse = await axios.get(`${localBaseUrl}/get-redirect-data?id_live=${id_live}`);
                 const redirectData = redirectResponse.data;
@@ -1014,7 +877,5 @@ const allTopics = [
 ];
 
 app.get("/get-all-topics", (req, res) => { res.json(allTopics); });
-
-
 
 module.exports = app;
