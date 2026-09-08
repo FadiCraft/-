@@ -312,7 +312,7 @@ app.get("/stream", async (req, res) => {
             // 🆕 إدارة الروابط المخصصة لقنوات beIN Sports
             // ==========================================
             const customBeinUrls = {
-                "live_tv_beinsport1": "",
+                "live_tv_beinsport1": "https://olayer-uzgv.onrender.com/direct/manifest.m3u8?url=http://89.33.13.172/live/16304575049793/43581893985883/445376.m3u8?token=aUdHbU.aHdXcHa.X.cXUfUa.yczHbdcU.X.y.TR.m3u8.6d595c6b2283b928dbf7a8f5250ab9ddaccb3b3cd221bf789fa4cab8d4e7ea3a...b3JpZW4ubGl2ZQ==",
                 "live_tv_beinsport2": "", // ضع الرابط الخاص بقناة 2 هنا
                 "live_tv_beinsport3": "", // ضع الرابط الخاص بقناة 3 هنا
                 "live_tv_beinsport4": ""  // ضع الرابط الخاص بقناة 4 هنا
