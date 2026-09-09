@@ -308,18 +308,28 @@ app.get("/stream", async (req, res) => {
             let finalStreamsArray = [];
             let serverCounter = 1;
 
+         // ==========================================
+            // 🆕 إدارة الروابط المخصصة (جلب ديناميكي من ملف خارجي)
             // ==========================================
-            // 🆕 إدارة الروابط المخصصة لقنوات beIN Sports
-            // ==========================================
-            const customBeinUrls = {
-                "live_tv_beinsport1": "",
-                "live_tv_beinsport2": "", // ضع الرابط الخاص بقناة 2 هنا
-                "live_tv_beinsport3": "", // ضع الرابط الخاص بقناة 3 هنا
-                "live_tv_beinsport4": ""  // ضع الرابط الخاص بقناة 4 هنا
-            };
+            let customUrls = {};
+            try {
+                // نستخدم نظام الكاش الخاص بك لجلب الملف من جيتهاب 
+                // سيتم تحديث الروابط تلقائياً كلما انتهت مدة الكاش (حسب إعداداتك كل 10 دقائق)
+                customUrls = await fetchWithCache("external_channels_json", async () => {
+                    const response = await axios.get("https://raw.githubusercontent.com/FadiCraft/-/refs/heads/main/Channals.json", { 
+                        timeout: 5000 // مهلة 5 ثوانٍ كحد أقصى للطلب
+                    });
+                    return typeof response.data === 'string' ? JSON.parse(response.data) : response.data;
+                });
+            } catch (error) {
+                console.error("فشل جلب ملف القنوات الخارجي:", error.message);
+                customUrls = {}; // في حال فشل الجلب، نعتبر الكائن فارغاً حتى لا يتوقف السيرفر عن العمل
+            }
 
-            const targetCustomUrl = customBeinUrls[id_live];
+            const targetCustomUrl = customUrls[id_live];
 
+
+            
             // سيتم تنفيذ هذا الشرط فقط إذا كان الرابط موجوداً وليس فارغاً
             if (targetCustomUrl && targetCustomUrl.trim() !== "") {
                 const customServerPayload = {
