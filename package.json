@@ -2,12 +2,12 @@
   "name": "movie-scraper-api",
   "version": "1.0.0",
   "description": "API for scraping movies, seasons, episodes, extracting m3u8 links, and DramaLive streams",
-  "main": "dramalive_api.js",
+  "main": "start.js",
   "engines": {
     "node": ">=20.0.0"
   },
   "scripts": {
-    "start": "node dramalive_api.js",
+    "start": "node start.js",
     "build": "npm install",
     "start:drama": "node start.js",
     "dev:drama": "nodemon start.js",
