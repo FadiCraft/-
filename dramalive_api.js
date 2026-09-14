@@ -343,7 +343,7 @@ app.get("/stream", async (req, res) => {
                             "agent": DEFAULT_USER_AGENT,
                             "acceptSSL": "1",
                             "mediatype": "hls",
-                            "headers": { "User-Agent": DEFAULT_USER_AGENT }
+                            "headers": { "User-Agent": "TDMuaEG" }
                         }),
                         "agent": "advanced"
                     }
